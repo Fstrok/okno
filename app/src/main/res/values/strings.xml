@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Okno</string>
+    <string name="setup_installing">Устанавливаю Debian… %1$d%%</string>
+    <string name="setup_failed">Не удалось установить Linux:\n%1$s</string>
+    <string name="setup_retry">Повторить</string>
+</resources>

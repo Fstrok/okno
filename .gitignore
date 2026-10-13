@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Fetched by scripts/fetch-rootfs.sh
+app/src/main/assets/rootfs.tgz
+app/src/main/assets/rootfs.version
