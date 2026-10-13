@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Okno</string>
-    <string name="setup_installing">Устанавливаю Debian… %1$d%%</string>
+    <string name="welcome_title">Okno</string>
+    <string name="welcome_text">Linux-компьютер с рабочим столом прямо в телефоне. Root не нужен, работает через Wi‑Fi и мобильный интернет.</string>
+    <string name="welcome_install">Установить</string>
+    <string name="installing_title">Установка</string>
+    <string name="setup_installing">Устанавливаю Linux… %1$d%%</string>
     <string name="setup_failed">Не удалось установить Linux:\n%1$s</string>
     <string name="setup_retry">Повторить</string>
+    <string name="starting_title">Запуск</string>
+    <string name="starting_text">Запускаю рабочий стол…</string>
+    <string name="desktop_stopped_title">Рабочий стол остановлен</string>
+    <string name="desktop_stopped_text">Его можно запустить заново, файлы и программы на месте.</string>
+    <string name="desktop_restart">Запустить снова</string>
 </resources>

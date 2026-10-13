@@ -16,6 +16,7 @@ import android.os.PowerManager
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
@@ -45,6 +46,7 @@ class LinuxService : Service() {
     private val idleClient = IdleSessionClient()
 
     private var installing = false
+    private var desktop: Process? = null
     private var installProgress = 0
     private var onInstallProgress: ((Int) -> Unit)? = null
     private var onInstallDone: ((Throwable?) -> Unit)? = null
@@ -71,6 +73,7 @@ class LinuxService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
+        desktop?.destroy()
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
         network.stopWatching()
@@ -79,12 +82,13 @@ class LinuxService : Service() {
         super.onDestroy()
     }
 
-    /** Unpacks Debian on first launch; callbacks arrive on the main thread. */
-    fun ensureInstalled(onProgress: (Int) -> Unit, onDone: (Throwable?) -> Unit) {
-        if (env.isInstalled) {
-            onDone(null)
-            return
-        }
+    val isInstalling: Boolean get() = installing
+
+    /**
+     * Unpacks the Linux system (or follows an install already running);
+     * callbacks arrive on the main thread.
+     */
+    fun install(onProgress: (Int) -> Unit, onDone: (Throwable?) -> Unit) {
         // A re-created activity takes over the callbacks of a running install.
         onInstallProgress = onProgress
         onInstallDone = onDone
@@ -111,6 +115,39 @@ class LinuxService : Service() {
         }
     }
 
+    /** Unix socket of the desktop's VNC server, as seen from Android. */
+    val desktopSocket: File get() = File(env.rootfs, "tmp/.okno/vnc.sock")
+
+    val isDesktopRunning: Boolean get() = desktop?.isAlive == true
+
+    /** Starts Xvnc + XFCE inside Linux (see rootfs-overlay/usr/local/bin/okno-desktop). */
+    fun startDesktop(width: Int, height: Int, dpi: Int) {
+        if (isDesktopRunning) return
+        network.writeResolvConf()
+        desktopSocket.delete()
+        val args = env.prootArgs(listOf(DESKTOP_LAUNCHER, "$width", "$height", "$dpi"))
+        val builder = ProcessBuilder(listOf(env.prootPath) + args.drop(1))
+            .directory(env.filesDir)
+            .redirectErrorStream(true)
+            .redirectOutput(File(env.filesDir, "desktop.log"))
+        builder.environment().clear()
+        env.hostEnvironment().forEach {
+            val (key, value) = it.split('=', limit = 2)
+            builder.environment()[key] = value
+        }
+        desktop = builder.start()
+        updateNotification()
+    }
+
+    fun stopDesktop() {
+        desktop?.destroy()
+        desktop = null
+        updateNotification()
+    }
+
+    fun desktopLog(): String =
+        File(env.filesDir, "desktop.log").takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
+
     fun createSession(): TerminalSession {
         network.writeResolvConf()
         val session = TerminalSession(
@@ -135,6 +172,7 @@ class LinuxService : Service() {
     fun networkSummary(): String = network.summary()
 
     fun exit() {
+        stopDesktop()
         sessionClient = null
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
@@ -176,7 +214,7 @@ class LinuxService : Service() {
             NotificationChannel(CHANNEL_ID, "Linux", NotificationManager.IMPORTANCE_LOW)
         )
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, TerminalActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, DesktopActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val exit = PendingIntent.getService(
             this, 1, Intent(this, LinuxService::class.java).setAction(ACTION_EXIT), PendingIntent.FLAG_IMMUTABLE
@@ -185,11 +223,11 @@ class LinuxService : Service() {
             this, 2, Intent(this, LinuxService::class.java).setAction(ACTION_TOGGLE_WAKE_LOCK),
             PendingIntent.FLAG_IMMUTABLE
         )
-        val count = sessions.size
-        val text = buildString {
-            append(if (count == 1) "1 сессия" else "Сессий: $count")
-            if (isHoldingWakeLock) append(" · без сна")
-        }
+        val text = buildList {
+            if (isDesktopRunning) add("рабочий стол")
+            if (sessions.isNotEmpty()) add("терминалов: ${sessions.size}")
+            if (isHoldingWakeLock) add("без сна")
+        }.joinToString(" · ").ifEmpty { "готов" }
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Okno: Linux работает")
@@ -228,6 +266,7 @@ class LinuxService : Service() {
         private const val CHANNEL_ID = "linux"
         private const val NOTIFICATION_ID = 1
         private const val TRANSCRIPT_ROWS = 5000
+        private const val DESKTOP_LAUNCHER = "/usr/local/bin/okno-desktop"
         const val ACTION_EXIT = "io.okno.EXIT"
         const val ACTION_TOGGLE_WAKE_LOCK = "io.okno.TOGGLE_WAKE_LOCK"
         const val ACTION_EXITED = "io.okno.EXITED"

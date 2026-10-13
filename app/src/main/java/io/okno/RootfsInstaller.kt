@@ -86,17 +86,11 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
         onProgress(100)
     }
 
-    /** One-time adjustments that make a container image behave well under proot on Android. */
+    /**
+     * Device-specific setup. Everything static (hosts, apt settings, desktop
+     * configuration) is baked into the image by scripts/build-rootfs.sh.
+     */
     private fun configure(root: File) {
-        File(root, "etc/hostname").writeText("okno\n")
-        File(root, "etc/hosts").writeText(
-            "127.0.0.1 localhost okno\n::1 localhost ip6-localhost ip6-loopback\n"
-        )
-
-        // apt drops privileges to the _apt user for downloads; under proot
-        // that switch is fake and can fail, so let apt stay "root".
-        File(root, "etc/apt/apt.conf.d/01okno").writeText("APT::Sandbox::User \"root\";\n")
-
         // Android puts the app into supplementary groups (internet, storage,
         // ...); name them so tools like `id` and `groups` don't complain.
         val groupFile = File(root, "etc/group")
@@ -105,17 +99,6 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
         if (missing.isNotEmpty()) {
             groupFile.appendText(missing.joinToString("") { "aid_$it:x:$it:root\n" })
         }
-
-        File(root, "etc/motd").writeText(
-            """
-            |Okno — Debian 13 (trixie) на Android.
-            |  Установка программ: apt update && apt install <пакет>
-            |  Память телефона:     /sdcard
-            |
-            """.trimMargin()
-        )
-        // Nothing runs login(1) under proot, so show the greeting from the login shell.
-        File(root, "etc/profile.d/okno.sh").writeText("[ -r /etc/motd ] && cat /etc/motd\n")
 
         // Rewritten from Android's current network on every session start.
         File(root, "etc/resolv.conf").delete()

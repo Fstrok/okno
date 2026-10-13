@@ -12,6 +12,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -22,16 +23,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Cache Debian rootfs
+      # The Linux system (Debian + XFCE) takes ~30 min to build under qemu,
+      # so it is rebuilt only when its recipe changes.
+      - name: Cache Linux system image
+        id: rootfs-cache
         uses: actions/cache@v4
         with:
           path: |
             app/src/main/assets/rootfs.tgz
             app/src/main/assets/rootfs.version
-          key: rootfs-${{ hashFiles('scripts/fetch-rootfs.sh') }}
+          key: rootfs-${{ hashFiles('scripts/build-rootfs.sh', 'scripts/fetch-rootfs.sh', 'scripts/build-proot.sh', 'scripts/xfconf-set.py', 'rootfs-overlay/**') }}
 
-      - name: Fetch Debian rootfs
-        run: scripts/fetch-rootfs.sh
+      - name: Build Linux system image
+        if: steps.rootfs-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-user-static gtk-update-icon-cache libtalloc-dev uthash-dev
+          scripts/build-proot.sh "$RUNNER_TEMP/proot"
+          sudo env PROOT="$RUNNER_TEMP/proot/proot" scripts/build-rootfs.sh
+          sudo chown -R "$(id -u):$(id -g)" app/src/main/assets
 
       - name: Build
         run: ./gradlew assembleDebug --console=plain

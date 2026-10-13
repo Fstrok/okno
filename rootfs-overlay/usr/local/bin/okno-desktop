@@ -1,0 +1,47 @@
+#!/bin/sh
+# Starts the desktop for the Okno app: Xvnc as display :1, reachable only
+# through a Unix socket inside the app's private storage, then XFCE on it.
+#   okno-desktop WIDTH HEIGHT DPI
+W=${1:-1600}
+H=${2:-900}
+DPI=${3:-120}
+SOCK_DIR=/tmp/.okno
+
+export DISPLAY=:1 HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
+export LANG=ru_RU.UTF-8 LANGUAGE=ru_RU:ru
+export XDG_RUNTIME_DIR=/tmp/runtime-root XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
+export NO_AT_BRIDGE=1
+
+mkdir -p "$SOCK_DIR" "$XDG_RUNTIME_DIR" /tmp/.X11-unix
+chmod 700 "$SOCK_DIR" "$XDG_RUNTIME_DIR"
+chmod 1777 /tmp/.X11-unix
+
+# A desktop from an earlier run may have outlived its proot: stop it, or the
+# new X server cannot take display :1.
+if [ -f /tmp/.X1-lock ]; then
+  old=$(tr -dc 0-9 < /tmp/.X1-lock)
+  [ -n "$old" ] && kill "$old" 2>/dev/null && sleep 1
+fi
+pkill -x xfce4-session 2>/dev/null
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 "$SOCK_DIR/vnc.sock" /root/.ICEauthority
+
+# Only the private Unix sockets: no TCP and no abstract-namespace socket
+# (those would be reachable by every app on the phone).
+Xvnc :1 -geometry "${W}x${H}" -depth 24 -dpi "$DPI" \
+  -rfbunixpath "$SOCK_DIR/vnc.sock" -rfbport -1 -SecurityTypes None \
+  -AlwaysShared -AcceptSetDesktopSize -nolisten tcp -nolisten local &
+XVNC=$!
+trap 'kill $XVNC 2>/dev/null' EXIT INT TERM
+
+i=0
+while [ ! -S /tmp/.X11-unix/X1 ] && [ $i -lt 200 ]; do
+  sleep 0.1
+  i=$((i + 1))
+done
+
+# Latin and Russian on the same keys (levels 1-2 / 3-4, see the okno XKB
+# layout), so text typed on the phone always maps to a real key. Otherwise
+# Xvnc remaps spare keys on the fly and apps can read the wrong letter.
+setxkbmap -layout okno
+
+dbus-launch --exit-with-session startxfce4

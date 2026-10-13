@@ -22,7 +22,9 @@ class LinuxEnvironment(context: Context) {
     private val proot = File(nativeDir, "libproot.so")
     private val loader = File(nativeDir, "libproot-loader.so")
 
-    val isInstalled: Boolean get() = File(rootfs, INSTALLED_MARKER).exists()
+    /** Installed and new enough to have the desktop (the first versions had none). */
+    val isInstalled: Boolean
+        get() = File(rootfs, INSTALLED_MARKER).exists() && File(rootfs, "usr/local/bin/okno-desktop").exists()
 
     val prootPath: String get() = proot.absolutePath
 

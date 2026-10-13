@@ -1,0 +1,4 @@
+Okno — Debian 13 (trixie) на Android.
+  Установка программ: apt update && apt install <пакет>
+  Память телефона:     /sdcard
+

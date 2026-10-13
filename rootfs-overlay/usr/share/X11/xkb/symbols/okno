@@ -1,0 +1,44 @@
+// Okno: US letters on levels 1-2 and Russian (JCUKEN) on levels 3-4 of the
+// same keys, all in one group. Text typed on the phone then always finds its
+// keysym in the keymap, so Xvnc never has to remap spare keys on the fly
+// (which races with applications reading the keymap).
+default partial alphanumeric_keys
+xkb_symbols "basic" {
+    include "us(basic)"
+    include "level3(ralt_switch)"
+    name[Group1] = "English + Russian (Okno)";
+
+    key <TLDE> { type[Group1] = "FOUR_LEVEL", [ grave, asciitilde, Cyrillic_io, Cyrillic_IO ] };
+    key <AD01> { type[Group1] = "FOUR_LEVEL", [ q, Q, Cyrillic_shorti, Cyrillic_SHORTI ] };
+    key <AD02> { type[Group1] = "FOUR_LEVEL", [ w, W, Cyrillic_tse, Cyrillic_TSE ] };
+    key <AD03> { type[Group1] = "FOUR_LEVEL", [ e, E, Cyrillic_u, Cyrillic_U ] };
+    key <AD04> { type[Group1] = "FOUR_LEVEL", [ r, R, Cyrillic_ka, Cyrillic_KA ] };
+    key <AD05> { type[Group1] = "FOUR_LEVEL", [ t, T, Cyrillic_ie, Cyrillic_IE ] };
+    key <AD06> { type[Group1] = "FOUR_LEVEL", [ y, Y, Cyrillic_en, Cyrillic_EN ] };
+    key <AD07> { type[Group1] = "FOUR_LEVEL", [ u, U, Cyrillic_ghe, Cyrillic_GHE ] };
+    key <AD08> { type[Group1] = "FOUR_LEVEL", [ i, I, Cyrillic_sha, Cyrillic_SHA ] };
+    key <AD09> { type[Group1] = "FOUR_LEVEL", [ o, O, Cyrillic_shcha, Cyrillic_SHCHA ] };
+    key <AD10> { type[Group1] = "FOUR_LEVEL", [ p, P, Cyrillic_ze, Cyrillic_ZE ] };
+    key <AD11> { type[Group1] = "FOUR_LEVEL", [ bracketleft, braceleft, Cyrillic_ha, Cyrillic_HA ] };
+    key <AD12> { type[Group1] = "FOUR_LEVEL", [ bracketright, braceright, Cyrillic_hardsign, Cyrillic_HARDSIGN ] };
+    key <AC01> { type[Group1] = "FOUR_LEVEL", [ a, A, Cyrillic_ef, Cyrillic_EF ] };
+    key <AC02> { type[Group1] = "FOUR_LEVEL", [ s, S, Cyrillic_yeru, Cyrillic_YERU ] };
+    key <AC03> { type[Group1] = "FOUR_LEVEL", [ d, D, Cyrillic_ve, Cyrillic_VE ] };
+    key <AC04> { type[Group1] = "FOUR_LEVEL", [ f, F, Cyrillic_a, Cyrillic_A ] };
+    key <AC05> { type[Group1] = "FOUR_LEVEL", [ g, G, Cyrillic_pe, Cyrillic_PE ] };
+    key <AC06> { type[Group1] = "FOUR_LEVEL", [ h, H, Cyrillic_er, Cyrillic_ER ] };
+    key <AC07> { type[Group1] = "FOUR_LEVEL", [ j, J, Cyrillic_o, Cyrillic_O ] };
+    key <AC08> { type[Group1] = "FOUR_LEVEL", [ k, K, Cyrillic_el, Cyrillic_EL ] };
+    key <AC09> { type[Group1] = "FOUR_LEVEL", [ l, L, Cyrillic_de, Cyrillic_DE ] };
+    key <AC10> { type[Group1] = "FOUR_LEVEL", [ semicolon, colon, Cyrillic_zhe, Cyrillic_ZHE ] };
+    key <AC11> { type[Group1] = "FOUR_LEVEL", [ apostrophe, quotedbl, Cyrillic_e, Cyrillic_E ] };
+    key <AB01> { type[Group1] = "FOUR_LEVEL", [ z, Z, Cyrillic_ya, Cyrillic_YA ] };
+    key <AB02> { type[Group1] = "FOUR_LEVEL", [ x, X, Cyrillic_che, Cyrillic_CHE ] };
+    key <AB03> { type[Group1] = "FOUR_LEVEL", [ c, C, Cyrillic_es, Cyrillic_ES ] };
+    key <AB04> { type[Group1] = "FOUR_LEVEL", [ v, V, Cyrillic_em, Cyrillic_EM ] };
+    key <AB05> { type[Group1] = "FOUR_LEVEL", [ b, B, Cyrillic_i, Cyrillic_I ] };
+    key <AB06> { type[Group1] = "FOUR_LEVEL", [ n, N, Cyrillic_te, Cyrillic_TE ] };
+    key <AB07> { type[Group1] = "FOUR_LEVEL", [ m, M, Cyrillic_softsign, Cyrillic_SOFTSIGN ] };
+    key <AB08> { type[Group1] = "FOUR_LEVEL", [ comma, less, Cyrillic_be, Cyrillic_BE ] };
+    key <AB09> { type[Group1] = "FOUR_LEVEL", [ period, greater, Cyrillic_yu, Cyrillic_YU ] };
+};

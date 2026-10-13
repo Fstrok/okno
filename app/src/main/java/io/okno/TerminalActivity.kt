@@ -24,10 +24,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.PopupMenu
-import android.widget.ProgressBar
-import android.widget.TextView
 import android.widget.Toast
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -39,10 +36,6 @@ class TerminalActivity : Activity(), ServiceConnection {
     private var service: LinuxService? = null
     private lateinit var terminalView: TerminalView
     private lateinit var extraKeys: ExtraKeysView
-    private lateinit var setupPanel: View
-    private lateinit var setupText: TextView
-    private lateinit var setupProgress: ProgressBar
-    private lateinit var retryButton: Button
 
     private val prefs by lazy { getSharedPreferences("okno", MODE_PRIVATE) }
     private var fontSize = 0
@@ -60,16 +53,11 @@ class TerminalActivity : Activity(), ServiceConnection {
         setContentView(R.layout.activity_terminal)
         terminalView = findViewById(R.id.terminal)
         extraKeys = findViewById(R.id.extra_keys)
-        setupPanel = findViewById(R.id.setup_panel)
-        setupText = findViewById(R.id.setup_text)
-        setupProgress = findViewById(R.id.setup_progress)
-        retryButton = findViewById(R.id.setup_retry)
 
         fontSize = prefs.getInt(PREF_FONT_SIZE, sp(12f)).coerceIn(minFontSize, maxFontSize)
         terminalView.setTextSize(fontSize)
         terminalView.setTerminalViewClient(viewClient)
         extraKeys.listener = keysListener
-        retryButton.setOnClickListener { startInstall() }
 
         val filter = IntentFilter(LinuxService.ACTION_EXITED)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -99,37 +87,21 @@ class TerminalActivity : Activity(), ServiceConnection {
         val svc = (binder as LinuxService.LocalBinder).service
         service = svc
         svc.sessionClient = sessionClient
-        startInstall()
+        attachSessions()
     }
 
     override fun onServiceDisconnected(name: ComponentName) {
         service = null
     }
 
-    private fun startInstall() {
+    private fun attachSessions() {
         val svc = service ?: return
         if (!svc.env.isInstalled) {
-            setupPanel.visibility = View.VISIBLE
-            retryButton.visibility = View.GONE
-            setupProgress.isIndeterminate = false
-            setupText.text = getString(R.string.setup_installing, 0)
+            // The system is installed from the main screen.
+            finish()
+            return
         }
-        svc.ensureInstalled(
-            onProgress = { percent ->
-                setupProgress.progress = percent
-                setupText.text = getString(R.string.setup_installing, percent)
-            },
-            onDone = { error ->
-                if (error != null) {
-                    Log.e(TAG, "rootfs install failed", error)
-                    setupText.text = getString(R.string.setup_failed, error.message ?: error.toString())
-                    retryButton.visibility = View.VISIBLE
-                } else {
-                    setupPanel.visibility = View.GONE
-                    showSession(currentSession?.takeIf { it in svc.sessions } ?: svc.sessions.lastOrNull() ?: svc.createSession())
-                }
-            },
-        )
+        showSession(currentSession?.takeIf { it in svc.sessions } ?: svc.sessions.lastOrNull() ?: svc.createSession())
     }
 
     private fun showSession(session: TerminalSession) {
@@ -143,7 +115,7 @@ class TerminalActivity : Activity(), ServiceConnection {
         val index = svc.sessions.indexOf(session)
         svc.removeSession(session)
         if (svc.sessions.isEmpty()) {
-            svc.exit()
+            finish()
             return
         }
         showSession(svc.sessions[(index - 1).coerceAtLeast(0)])
@@ -152,7 +124,7 @@ class TerminalActivity : Activity(), ServiceConnection {
     @Deprecated("Activity is the platform class; targetSdk 28 still routes Back here")
     override fun onBackPressed() {
         if (terminalView.isSelectingText) terminalView.stopTextSelectionMode()
-        else moveTaskToBack(true)
+        else finish() // back to the desktop; sessions keep running in the service
     }
 
     private fun showMenu(anchor: View) {
@@ -176,7 +148,8 @@ class TerminalActivity : Activity(), ServiceConnection {
         if (!getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) {
             menu.menu.add(0, MENU_BATTERY, 105, "Не ограничивать в фоне")
         }
-        menu.menu.add(0, MENU_EXIT, 106, "Выход")
+        menu.menu.add(0, MENU_DESKTOP, 106, "Рабочий стол")
+        menu.menu.add(0, MENU_EXIT, 107, "Выход")
         menu.setOnMenuItemClickListener { item ->
             when {
                 item.groupId == GROUP_SESSIONS -> svc.sessions.getOrNull(item.itemId)?.let(::showSession)
@@ -194,6 +167,7 @@ class TerminalActivity : Activity(), ServiceConnection {
                 item.itemId == MENU_BATTERY -> startActivity(
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
                 )
+                item.itemId == MENU_DESKTOP -> finish()
                 item.itemId == MENU_EXIT -> svc.exit()
             }
             true
@@ -228,7 +202,9 @@ class TerminalActivity : Activity(), ServiceConnection {
             terminalView.inputCodePoint(codePoint, false, false)
         }
 
-        override fun onMenu(anchor: View) = showMenu(anchor)
+        override fun onButton(id: String, anchor: View) {
+            if (id == ExtraKeysView.BUTTON_MENU) showMenu(anchor)
+        }
     }
 
     private val viewClient = object : TerminalViewClient {
@@ -261,8 +237,8 @@ class TerminalActivity : Activity(), ServiceConnection {
 
         override fun onKeyUp(keyCode: Int, e: KeyEvent) = false
         override fun onLongPress(event: MotionEvent) = false
-        override fun readControlKey() = extraKeys.consumeCtrl()
-        override fun readAltKey() = extraKeys.consumeAlt()
+        override fun readControlKey() = extraKeys.consume(ExtraKeysView.Modifier.CTRL)
+        override fun readAltKey() = extraKeys.consume(ExtraKeysView.Modifier.ALT)
         override fun readShiftKey() = false
         override fun readFnKey() = false
         override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession) = false
@@ -329,5 +305,6 @@ class TerminalActivity : Activity(), ServiceConnection {
         private const val MENU_WAKE = 1004
         private const val MENU_BATTERY = 1005
         private const val MENU_EXIT = 1006
+        private const val MENU_DESKTOP = 1007
     }
 }
