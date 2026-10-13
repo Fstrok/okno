@@ -3,7 +3,8 @@
 # debian:trixie-slim arm64 image (scripts/fetch-rootfs.sh) plus the XFCE
 # desktop, TigerVNC and Okno's configuration. Runs on any Linux host:
 # arm64 natively, x86_64 through proot + qemu-user.
-# Host packages: gtk-update-icon-cache (+ qemu-user-static on x86_64), and a
+# Host packages: gtk-update-icon-cache, an aarch64 C compiler (CC_AARCH64,
+# default aarch64-linux-gnu-gcc), qemu-user-static on x86_64, and a
 # proot that understands statx (PROOT=..., see scripts/build-proot.sh): the
 # 5.1.0 shipped by Debian/Ubuntu does not, so file checks inside the image
 # would silently look at the host.
@@ -30,6 +31,8 @@ main() {
     # look and feel
     greybird-gtk-theme elementary-xfce-icon-theme librsvg2-common
     fonts-dejavu-core fonts-noto-color-emoji
+    # remote access (started from the app, see rootfs-overlay/usr/local/bin/okno-ssh)
+    openssh-server
     # base tools
     locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion
   )
@@ -97,6 +100,13 @@ EOF2
   cp -r "$ROOT_DIR/rootfs-overlay/." "$FS/"
   chmod 755 "$FS/usr/local/bin/"*
 
+  # LD_PRELOAD shim that lets sftp-server run under proot (native/nodumpable.c).
+  "${CC_AARCH64:-aarch64-linux-gnu-gcc}" -shared -fPIC -O2 -Wall \
+    -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
+
+  # Every phone must get its own SSH host keys (okno-ssh creates them).
+  rm -f "$FS"/etc/ssh/ssh_host_*
+
   # Single properties on top of Debian's packaged defaults (those files also
   # define the session itself, so they are edited, not replaced).
   XF="$FS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
@@ -125,7 +135,7 @@ EOF2
   mv "$ASSETS/rootfs.tgz.part" "$ASSETS/rootfs.tgz"
   {
     echo "base=$(cat "$base_tar.version")"
-    echo "overlay=$(cd "$ROOT_DIR" && cat scripts/build-rootfs.sh $(find rootfs-overlay -type f | sort) | sha256sum | cut -c1-16)"
+    echo "overlay=$(cd "$ROOT_DIR" && cat scripts/build-rootfs.sh native/* $(find rootfs-overlay -type f | sort) | sha256sum | cut -c1-16)"
   } > "$ASSETS/rootfs.version"
   du -sh "$FS" "$ASSETS/rootfs.tgz"
 }

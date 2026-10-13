@@ -17,6 +17,7 @@ import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import java.io.File
+import java.security.SecureRandom
 import java.util.concurrent.Executors
 
 /**
@@ -47,6 +48,9 @@ class LinuxService : Service() {
 
     private var installing = false
     private var desktop: Process? = null
+    private var ssh: Process? = null
+    private var sshTookWakeLock = false
+    private val prefs by lazy { getSharedPreferences("okno", MODE_PRIVATE) }
     private var installProgress = 0
     private var onInstallProgress: ((Int) -> Unit)? = null
     private var onInstallDone: ((Throwable?) -> Unit)? = null
@@ -74,6 +78,7 @@ class LinuxService : Service() {
 
     override fun onDestroy() {
         desktop?.destroy()
+        ssh?.destroy()
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
         network.stopWatching()
@@ -123,19 +128,8 @@ class LinuxService : Service() {
     /** Starts Xvnc + XFCE inside Linux (see rootfs-overlay/usr/local/bin/okno-desktop). */
     fun startDesktop(width: Int, height: Int, dpi: Int) {
         if (isDesktopRunning) return
-        network.writeResolvConf()
         desktopSocket.delete()
-        val args = env.prootArgs(listOf(DESKTOP_LAUNCHER, "$width", "$height", "$dpi"))
-        val builder = ProcessBuilder(listOf(env.prootPath) + args.drop(1))
-            .directory(env.filesDir)
-            .redirectErrorStream(true)
-            .redirectOutput(File(env.filesDir, "desktop.log"))
-        builder.environment().clear()
-        env.hostEnvironment().forEach {
-            val (key, value) = it.split('=', limit = 2)
-            builder.environment()[key] = value
-        }
-        desktop = builder.start()
+        desktop = startLinuxProcess(listOf(DESKTOP_LAUNCHER, "$width", "$height", "$dpi"), DESKTOP_LOG)
         updateNotification()
     }
 
@@ -145,15 +139,78 @@ class LinuxService : Service() {
         updateNotification()
     }
 
-    fun desktopLog(): String =
-        File(env.filesDir, "desktop.log").takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
+    fun desktopLog(): String = readLog(DESKTOP_LOG)
 
-    fun createSession(): TerminalSession {
+    val isSshRunning: Boolean get() = ssh?.isAlive == true
+
+    /** Root password for SSH: generated once, kept until the user asks for a new one. */
+    val sshPassword: String
+        get() = prefs.getString(PREF_SSH_PASSWORD, null) ?: newSshPassword()
+
+    fun newSshPassword(): String {
+        val alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val random = SecureRandom()
+        val password = (1..12).map { alphabet[random.nextInt(alphabet.length)] }.joinToString("")
+        prefs.edit().putString(PREF_SSH_PASSWORD, password).apply()
+        if (isSshRunning) {
+            stopSsh()
+            startSsh()
+        }
+        return password
+    }
+
+    /** SSH server on port [SSH_PORT] (see rootfs-overlay/usr/local/bin/okno-ssh). */
+    fun startSsh() {
+        if (isSshRunning) return
+        val process = startLinuxProcess(listOf(SSH_LAUNCHER), SSH_LOG)
+        // The password goes through stdin so it never shows up in a process list.
+        process.outputStream.bufferedWriter().use { it.write(sshPassword + "\n") }
+        ssh = process
+        // With the screen off, Wi-Fi would doze and drop SSH connections.
+        if (!isHoldingWakeLock) {
+            toggleWakeLock()
+            sshTookWakeLock = true
+        }
+        updateNotification()
+    }
+
+    fun stopSsh() {
+        ssh?.destroy()
+        ssh = null
+        if (sshTookWakeLock && isHoldingWakeLock) toggleWakeLock()
+        sshTookWakeLock = false
+        updateNotification()
+    }
+
+    fun sshAddresses(): List<String> = network.reachableAddresses()
+
+    fun sshLog(): String = readLog(SSH_LOG)
+
+    private fun startLinuxProcess(command: List<String>, log: String): Process {
+        network.writeResolvConf()
+        val args = env.prootArgs(command)
+        val builder = ProcessBuilder(listOf(env.prootPath) + args.drop(1))
+            .directory(env.filesDir)
+            .redirectErrorStream(true)
+            .redirectOutput(File(env.filesDir, log))
+        builder.environment().clear()
+        env.hostEnvironment().forEach {
+            val (key, value) = it.split('=', limit = 2)
+            builder.environment()[key] = value
+        }
+        return builder.start()
+    }
+
+    private fun readLog(name: String): String =
+        File(env.filesDir, name).takeIf { it.exists() }?.readText()?.takeLast(4000).orEmpty()
+
+    /** A terminal session running [command] (a login shell by default). */
+    fun createSession(command: List<String> = LinuxEnvironment.LOGIN_SHELL): TerminalSession {
         network.writeResolvConf()
         val session = TerminalSession(
             env.prootPath,
             env.filesDir.absolutePath,
-            env.prootArgs(LinuxEnvironment.LOGIN_SHELL),
+            env.prootArgs(command),
             env.hostEnvironment(),
             TRANSCRIPT_ROWS,
             sessionClient ?: idleClient,
@@ -173,6 +230,7 @@ class LinuxService : Service() {
 
     fun exit() {
         stopDesktop()
+        stopSsh()
         sessionClient = null
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
@@ -225,6 +283,7 @@ class LinuxService : Service() {
         )
         val text = buildList {
             if (isDesktopRunning) add("рабочий стол")
+            if (isSshRunning) add("SSH :$SSH_PORT")
             if (sessions.isNotEmpty()) add("терминалов: ${sessions.size}")
             if (isHoldingWakeLock) add("без сна")
         }.joinToString(" · ").ifEmpty { "готов" }
@@ -267,6 +326,11 @@ class LinuxService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val TRANSCRIPT_ROWS = 5000
         private const val DESKTOP_LAUNCHER = "/usr/local/bin/okno-desktop"
+        private const val DESKTOP_LOG = "desktop.log"
+        private const val SSH_LAUNCHER = "/usr/local/bin/okno-ssh"
+        private const val SSH_LOG = "ssh.log"
+        private const val PREF_SSH_PASSWORD = "ssh_password"
+        const val SSH_PORT = 8022
         const val ACTION_EXIT = "io.okno.EXIT"
         const val ACTION_TOGGLE_WAKE_LOCK = "io.okno.TOGGLE_WAKE_LOCK"
         const val ACTION_EXITED = "io.okno.EXITED"

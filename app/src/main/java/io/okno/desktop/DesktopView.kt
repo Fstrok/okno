@@ -44,6 +44,9 @@ class DesktopView(context: Context, attrs: AttributeSet?) : View(context, attrs)
     var client: RfbClient? = null
     var keySender: KeySender? = null
 
+    /** Text copied on the desktop; called on the UI thread. */
+    var onClipboard: ((String) -> Unit)? = null
+
     /** Called on the UI thread when the view size suggests a new desktop resolution. */
     var onSizeChanged: ((width: Int, height: Int) -> Unit)? = null
 
@@ -82,6 +85,10 @@ class DesktopView(context: Context, attrs: AttributeSet?) : View(context, attrs)
             updateTransform()
             invalidate()
         }
+    }
+
+    override fun onClipboardText(text: String) {
+        main.post { onClipboard?.invoke(text) }
     }
 
     override fun onResizeSupported() {

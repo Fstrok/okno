@@ -32,13 +32,13 @@ jobs:
           path: |
             app/src/main/assets/rootfs.tgz
             app/src/main/assets/rootfs.version
-          key: rootfs-${{ hashFiles('scripts/build-rootfs.sh', 'scripts/fetch-rootfs.sh', 'scripts/build-proot.sh', 'scripts/xfconf-set.py', 'rootfs-overlay/**') }}
+          key: rootfs-${{ hashFiles('scripts/build-rootfs.sh', 'scripts/fetch-rootfs.sh', 'scripts/build-proot.sh', 'scripts/xfconf-set.py', 'native/**', 'rootfs-overlay/**') }}
 
       - name: Build Linux system image
         if: steps.rootfs-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q qemu-user-static gtk-update-icon-cache libtalloc-dev uthash-dev
+          sudo apt-get install -y -q qemu-user-static gtk-update-icon-cache libtalloc-dev uthash-dev gcc-aarch64-linux-gnu
           scripts/build-proot.sh "$RUNNER_TEMP/proot"
           sudo env PROOT="$RUNNER_TEMP/proot/proot" scripts/build-rootfs.sh
           sudo chown -R "$(id -u):$(id -g)" app/src/main/assets

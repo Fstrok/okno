@@ -26,6 +26,10 @@ class LinuxEnvironment(context: Context) {
     val isInstalled: Boolean
         get() = File(rootfs, INSTALLED_MARKER).exists() && File(rootfs, "usr/local/bin/okno-desktop").exists()
 
+    /** Version of the installed system image, as written by [RootfsInstaller]. */
+    val installedVersion: String?
+        get() = File(rootfs, INSTALLED_MARKER).takeIf { it.exists() }?.readText()?.trim()
+
     val prootPath: String get() = proot.absolutePath
 
     /** Environment of the proot process itself (Android side). */

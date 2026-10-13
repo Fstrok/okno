@@ -31,6 +31,7 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
         val total = context.assets.openFd(ASSET).use { it.length }
         val counter = CountingInputStream(context.assets.open(ASSET))
         val dirModes = ArrayList<Pair<File, Int>>()
+        val madeDirs = HashSet<String>() // ~25k entries: skip mkdirs() for known parents
         val hardLinks = ArrayList<Triple<File, String, Int>>()
         var lastPercent = -1
 
@@ -40,7 +41,7 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
                 val name = entry.name.removePrefix("./").trimEnd('/')
                 if (name.isEmpty() || name.split('/').contains("..")) continue
                 val target = File(staging, name)
-                target.parentFile?.mkdirs()
+                target.parentFile?.let { if (madeDirs.add(it.path)) it.mkdirs() }
                 when {
                     entry.isDirectory -> {
                         target.mkdirs()
@@ -113,12 +114,7 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
         return (groups + Os.getgid()).distinct()
     }
 
-    private fun rootfsVersion(): String =
-        try {
-            context.assets.open("rootfs.version").bufferedReader().use { it.readText().trim() }
-        } catch (e: IOException) {
-            "unknown"
-        }
+    private fun rootfsVersion(): String = bundledVersion(context)
 
     private fun chmod(file: File, mode: Int) {
         try {
@@ -143,6 +139,14 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
 
     companion object {
         private const val ASSET = "rootfs.tgz"
+
+        /** Version of the system image inside this APK (scripts/build-rootfs.sh). */
+        fun bundledVersion(context: Context): String =
+            try {
+                context.assets.open("rootfs.version").bufferedReader().use { it.readText().trim() }
+            } catch (e: IOException) {
+                "unknown"
+            }
 
         /**
          * Recursive delete that never follows symlinks: the Linux tree is full

@@ -69,6 +69,17 @@ class NetworkConfig(context: Context, private val env: LinuxEnvironment) {
         append(lines.joinToString("\n").ifEmpty { "  нет" })
     }
 
+    /**
+     * IPv4 addresses other devices could reach, Wi-Fi first. Mobile-network
+     * addresses are usually behind carrier NAT and only listed last.
+     */
+    fun reachableAddresses(): List<String> =
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .filter { it.isUp && !it.isLoopback }
+            .sortedBy { if (it.name.startsWith("wlan") || it.name.startsWith("ap")) 0 else 1 }
+            .flatMap { iface -> iface.inetAddresses.toList().filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress } }
+            .distinct()
+
     private fun describe(network: Network?): String {
         val caps = network?.let { connectivity.getNetworkCapabilities(it) } ?: return "нет сети"
         val kinds = buildList {

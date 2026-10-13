@@ -7,6 +7,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.Deflater
+import java.util.zip.Inflater
 
 /**
  * Minimal RFB 3.8 (VNC) client for the desktop running inside Linux.
@@ -30,6 +32,9 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
 
         /** The server accepts [requestDesktopSize] from now on (reader thread). */
         fun onResizeSupported()
+
+        /** Text copied on the desktop (reader thread). */
+        fun onClipboardText(text: String) = Unit
     }
 
     var listener: Listener? = null
@@ -54,10 +59,7 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
                     input.skipFully(input.readUnsignedShort() * 6)
                 }
                 2 -> Unit // Bell
-                3 -> { // ServerCutText: Latin-1 only in plain RFB, not used yet
-                    input.skipFully(3)
-                    input.skipFully(input.readInt())
-                }
+                3 -> readServerCutText()
                 150 -> Unit // EndOfContinuousUpdates
                 else -> throw IOException("unknown RFB message $type")
             }
@@ -86,7 +88,10 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
         write { out ->
             // SetPixelFormat: 32 bpp, little endian, 0x00RRGGBB — Android's int colour layout.
             out.write(byteArrayOf(0, 0, 0, 0, 32, 24, 0, 1, 0, 255.toByte(), 0, 255.toByte(), 0, 255.toByte(), 16, 8, 0, 0, 0, 0))
-            val encodings = intArrayOf(ENC_COPYRECT, ENC_RAW, ENC_EXTENDED_DESKTOP_SIZE, ENC_DESKTOP_SIZE, ENC_LAST_RECT)
+            val encodings = intArrayOf(
+                ENC_COPYRECT, ENC_RAW, ENC_EXTENDED_DESKTOP_SIZE, ENC_DESKTOP_SIZE, ENC_LAST_RECT,
+                ENC_EXTENDED_CLIPBOARD,
+            )
             val msg = ByteBuffer.allocate(4 + encodings.size * 4)
             msg.put(2).put(0).putShort(encodings.size.toShort())
             encodings.forEach { msg.putInt(it) }
@@ -148,6 +153,103 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
         if (width == framebuffer.width && height == framebuffer.height) return
         framebuffer.resize(width, height)
         listener?.onResize(width, height)
+    }
+
+    // ---- clipboard ----
+    //
+    // Plain RFB clipboard text is Latin-1 only. The Extended Clipboard
+    // extension (TigerVNC, rfbproto "ExtendedClipboard") carries UTF-8 and
+    // works by announcing: notify → request → provide (zlib-compressed).
+
+    @Volatile
+    private var extendedClipboard = false
+
+    @Volatile
+    private var localClipboard: String? = null
+
+    private fun readServerCutText() {
+        input.skipFully(3)
+        val length = input.readInt()
+        if (length >= 0) {
+            val bytes = ByteArray(length).also { input.readFully(it) }
+            listener?.onClipboardText(bytes.toString(Charsets.ISO_8859_1).replace("\r\n", "\n"))
+            return
+        }
+        val payload = ByteArray(-length).also { input.readFully(it) }
+        val buffer = ByteBuffer.wrap(payload)
+        val flags = buffer.int
+        when {
+            flags and CLIP_CAPS != 0 -> {
+                extendedClipboard = true
+                // We take text only, and ask for it rather than having it pushed.
+                sendExtendedClipboard(CLIP_CAPS or CLIP_REQUEST or CLIP_PEEK or CLIP_NOTIFY or CLIP_PROVIDE or CLIP_TEXT) {
+                    it.putInt(MAX_CLIPBOARD_BYTES)
+                }
+            }
+            flags and CLIP_REQUEST != 0 -> if (flags and CLIP_TEXT != 0) provideClipboard()
+            flags and CLIP_PEEK != 0 -> sendExtendedClipboard(CLIP_NOTIFY or if (localClipboard != null) CLIP_TEXT else 0)
+            flags and CLIP_NOTIFY != 0 -> if (flags and CLIP_TEXT != 0) sendExtendedClipboard(CLIP_REQUEST or CLIP_TEXT)
+            flags and CLIP_PROVIDE != 0 -> if (flags and CLIP_TEXT != 0) {
+                val data = inflate(payload, buffer.position())
+                val size = data.int
+                if (size in 0..data.remaining()) {
+                    val text = String(data.array(), data.position(), size, Charsets.UTF_8)
+                    listener?.onClipboardText(text.trimEnd('\u0000').replace("\r\n", "\n"))
+                }
+            }
+        }
+    }
+
+    /** Offers text copied on the phone to the desktop. */
+    fun sendClipboard(text: String) {
+        localClipboard = text
+        if (extendedClipboard) {
+            sendExtendedClipboard(CLIP_NOTIFY or CLIP_TEXT)
+        } else if (text.all { it.code < 256 }) {
+            val bytes = text.replace("\n", "\r\n").toByteArray(Charsets.ISO_8859_1)
+            write { out ->
+                out.write(ByteBuffer.allocate(8).put(6).put(0).putShort(0).putInt(bytes.size).array())
+                out.write(bytes)
+            }
+        }
+    }
+
+    private fun provideClipboard() {
+        val text = localClipboard ?: return
+        val utf8 = (text.replace("\r\n", "\n").replace("\n", "\r\n") + "\u0000").toByteArray(Charsets.UTF_8)
+        val raw = ByteBuffer.allocate(4 + utf8.size).putInt(utf8.size).put(utf8).array()
+        val deflater = Deflater()
+        deflater.setInput(raw)
+        deflater.finish()
+        val compressed = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        while (!deflater.finished()) compressed.write(chunk, 0, deflater.deflate(chunk))
+        deflater.end()
+        val bytes = compressed.toByteArray()
+        sendExtendedClipboard(CLIP_PROVIDE or CLIP_TEXT, bytes.size) { it.put(bytes) }
+    }
+
+    private fun sendExtendedClipboard(flags: Int, extra: Int = 0, body: (ByteBuffer) -> Unit = {}) {
+        val size = 4 + extra + if (flags and CLIP_CAPS != 0) 4 else 0
+        val msg = ByteBuffer.allocate(8 + size)
+        msg.put(6).put(0).putShort(0).putInt(-size).putInt(flags)
+        body(msg)
+        write { it.write(msg.array(), 0, msg.position()) }
+    }
+
+    private fun inflate(payload: ByteArray, offset: Int): ByteBuffer {
+        val inflater = Inflater()
+        inflater.setInput(payload, offset, payload.size - offset)
+        val out = java.io.ByteArrayOutputStream()
+        val chunk = ByteArray(8192)
+        while (!inflater.finished()) {
+            val n = inflater.inflate(chunk)
+            if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+            out.write(chunk, 0, n)
+            if (out.size() > MAX_CLIPBOARD_BYTES) break
+        }
+        inflater.end()
+        return ByteBuffer.wrap(out.toByteArray())
     }
 
     fun requestUpdate(incremental: Boolean) = write { out ->
@@ -214,6 +316,14 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
         private const val ENC_DESKTOP_SIZE = -223
         private const val ENC_LAST_RECT = -224
         private const val ENC_EXTENDED_DESKTOP_SIZE = -308
+        private const val ENC_EXTENDED_CLIPBOARD = 0xC0A1E5CE.toInt()
+        private const val CLIP_TEXT = 1
+        private const val CLIP_CAPS = 1 shl 24
+        private const val CLIP_REQUEST = 1 shl 25
+        private const val CLIP_PEEK = 1 shl 26
+        private const val CLIP_NOTIFY = 1 shl 27
+        private const val CLIP_PROVIDE = 1 shl 28
+        private const val MAX_CLIPBOARD_BYTES = 4 shl 20
         private const val OPAQUE = 0xFF000000.toInt()
     }
 }

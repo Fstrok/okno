@@ -11,6 +11,9 @@ export DISPLAY=:1 HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
 export LANG=ru_RU.UTF-8 LANGUAGE=ru_RU:ru
 export XDG_RUNTIME_DIR=/tmp/runtime-root XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
 export NO_AT_BRIDGE=1
+# Firefox's sandboxes rely on seccomp and namespaces that clash with proot.
+export MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_DISABLE_GMP_SANDBOX=1 MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1 MOZ_DISABLE_UTILITY_SANDBOX=1
 
 mkdir -p "$SOCK_DIR" "$XDG_RUNTIME_DIR" /tmp/.X11-unix
 chmod 700 "$SOCK_DIR" "$XDG_RUNTIME_DIR"
@@ -18,18 +21,22 @@ chmod 1777 /tmp/.X11-unix
 
 # A desktop from an earlier run may have outlived its proot: stop it, or the
 # new X server cannot take display :1.
-if [ -f /tmp/.X1-lock ]; then
-  old=$(tr -dc 0-9 < /tmp/.X1-lock)
-  [ -n "$old" ] && kill "$old" 2>/dev/null && sleep 1
+# Only if that PID still is an X server: PIDs get reused.
+old=$(tr -dc 0-9 < /tmp/.X1-lock 2>/dev/null)
+if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q Xvnc; then
+  kill "$old"
+  sleep 1
 fi
 pkill -x xfce4-session 2>/dev/null
 rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 "$SOCK_DIR/vnc.sock" /root/.ICEauthority
 
 # Only the private Unix sockets: no TCP and no abstract-namespace socket
-# (those would be reachable by every app on the phone).
+# (those would be reachable by every app on the phone). The phone's clipboard
+# follows explicit copies (CLIPBOARD), not every mouse selection (PRIMARY).
 Xvnc :1 -geometry "${W}x${H}" -depth 24 -dpi "$DPI" \
   -rfbunixpath "$SOCK_DIR/vnc.sock" -rfbport -1 -SecurityTypes None \
-  -AlwaysShared -AcceptSetDesktopSize -nolisten tcp -nolisten local &
+  -AlwaysShared -AcceptSetDesktopSize -nolisten tcp -nolisten local \
+  -SendPrimary=0 &
 XVNC=$!
 trap 'kill $XVNC 2>/dev/null' EXIT INT TERM
 

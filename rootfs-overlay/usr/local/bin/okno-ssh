@@ -1,0 +1,20 @@
+#!/bin/sh
+# SSH server for the Okno app. Reads the root password the app generated
+# from stdin, so it never appears in a process list.
+#   echo PASSWORD | okno-ssh
+if [ ! -t 0 ] && read -r password && [ -n "$password" ]; then
+  echo "root:$password" | chpasswd
+fi
+# An sshd from an earlier run may have outlived its proot and hold the port.
+old=$(cat /run/sshd.pid 2>/dev/null)
+if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q sshd; then
+  kill "$old"
+  sleep 1
+fi
+
+# Host keys are created on the phone on first use, never shipped in the
+# image: every installation must have its own.
+ssh-keygen -A >/dev/null
+mkdir -p /run/sshd
+chmod 755 /run/sshd
+exec /usr/sbin/sshd -D -e

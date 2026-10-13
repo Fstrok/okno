@@ -1,13 +1,17 @@
 package io.okno
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.net.Uri
@@ -48,6 +52,7 @@ class DesktopActivity : Activity(), ServiceConnection {
     private lateinit var overlayButton: Button
 
     private val main = Handler(Looper.getMainLooper())
+    private val prefs by lazy { getSharedPreferences("okno", MODE_PRIVATE) }
     // Keeps key events in order: one thread writes them all.
     private val sendQueue = Executors.newSingleThreadExecutor()
     private var socket: LocalSocket? = null
@@ -75,6 +80,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         extraKeys.listener = keysListener
         desktopView.keySender = DesktopView.KeySender(::sendKey)
         desktopView.onSizeChanged = { w, h -> resizeDesktop(w, h) }
+        desktopView.onClipboard = ::onDesktopClipboard
         hideSystemBars()
 
         val filter = IntentFilter(LinuxService.ACTION_EXITED)
@@ -90,12 +96,14 @@ class DesktopActivity : Activity(), ServiceConnection {
 
     override fun onStart() {
         super.onStart()
+        clipboard.addPrimaryClipChangedListener(clipboardListener)
         val intent = Intent(this, LinuxService::class.java)
         startForegroundService(intent)
         bindService(intent, this, 0)
     }
 
     override fun onStop() {
+        clipboard.removePrimaryClipChangedListener(clipboardListener)
         disconnect()
         if (service != null) unbindService(this)
         service = null
@@ -104,14 +112,21 @@ class DesktopActivity : Activity(), ServiceConnection {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideSystemBars()
+        if (hasFocus) {
+            hideSystemBars()
+            // Android lets apps read the clipboard only while focused.
+            pushPhoneClipboard()
+        }
     }
 
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
         val svc = (binder as LinuxService.LocalBinder).service
         service = svc
         when {
-            svc.env.isInstalled -> startDesktop()
+            svc.env.isInstalled -> {
+                startDesktop()
+                offerSystemUpdate()
+            }
             svc.isInstalling -> install()
             else -> showWelcome()
         }
@@ -141,7 +156,10 @@ class DesktopActivity : Activity(), ServiceConnection {
             },
             onDone = { error ->
                 if (error == null) {
-                    startDesktop()
+                    // Ask for the phone's files before the first start: the
+                    // folder is attached when the desktop starts.
+                    if (hasStorage()) startDesktop()
+                    else requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_FIRST)
                 } else {
                     Log.e(TAG, "install failed", error)
                     showOverlay(
@@ -171,9 +189,10 @@ class DesktopActivity : Activity(), ServiceConnection {
         connect()
     }
 
-    /** Desktop resolution: the view size scaled so the shorter side is about 720 px. */
+    /** Desktop resolution: the view size scaled to the chosen interface size (shorter side). */
     private fun desktopSizeFor(viewW: Int, viewH: Int): Pair<Int, Int> {
-        val factor = (minOf(viewW, viewH) / TARGET_SHORT_SIDE).coerceAtLeast(1f)
+        val shortSide = prefs.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
+        val factor = (minOf(viewW, viewH) / shortSide.toFloat()).coerceAtLeast(1f)
         // Even sizes keep Xvnc and the scaling filter happy.
         val w = ((viewW / factor).roundToInt() / 2) * 2
         val h = ((viewH / factor).roundToInt() / 2) * 2
@@ -206,6 +225,7 @@ class DesktopActivity : Activity(), ServiceConnection {
                     main.post {
                         desktopView.client = client
                         hideOverlay()
+                        pushPhoneClipboard()
                     }
                     client.run() // until the connection breaks
                 } catch (e: Exception) {
@@ -251,6 +271,31 @@ class DesktopActivity : Activity(), ServiceConnection {
         startDesktop()
     }
 
+    // ---- clipboard ----
+    //
+    // Copy on either side, paste on the other. lastClipboard stops the text
+    // from bouncing back and forth.
+
+    private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
+    private var lastClipboard: String? = null
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { pushPhoneClipboard() }
+
+    private fun pushPhoneClipboard() {
+        val client = desktopView.client ?: return
+        val text = runCatching {
+            clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull()
+        if (text.isNullOrEmpty() || text == lastClipboard) return
+        lastClipboard = text
+        sendQueue.execute { runCatching { client.sendClipboard(text) } }
+    }
+
+    private fun onDesktopClipboard(text: String) {
+        if (text == lastClipboard) return
+        lastClipboard = text
+        clipboard.setPrimaryClip(ClipData.newPlainText("Okno", text))
+    }
+
     // ---- keys ----
 
     /** One key press; on-screen Ctrl/Alt toggles wrap it like held modifiers. */
@@ -291,9 +336,13 @@ class DesktopActivity : Activity(), ServiceConnection {
     private fun showMenu(anchor: View) {
         val svc = service ?: return
         val menu = PopupMenu(this, anchor)
+        menu.menu.add(0, MENU_PROGRAMS, 0, "Программы…")
         menu.menu.add(0, MENU_TERMINAL, 0, "Терминал")
         menu.menu.add(0, MENU_RESTART, 1, "Перезапустить рабочий стол")
+        menu.menu.add(0, MENU_UI_SIZE, 2, "Размер интерфейса…")
+        if (!hasStorage()) menu.menu.add(0, MENU_STORAGE, 2, "Доступ к файлам телефона")
         menu.menu.add(0, MENU_NETWORK, 2, "Сеть…")
+        menu.menu.add(0, MENU_SSH, 2, if (svc.isSshRunning) "Удалённый доступ (SSH): вкл" else "Удалённый доступ (SSH)…")
         menu.menu.add(0, MENU_WAKE, 3, "Не засыпать").apply {
             isCheckable = true
             isChecked = svc.isHoldingWakeLock
@@ -304,6 +353,17 @@ class DesktopActivity : Activity(), ServiceConnection {
         menu.menu.add(0, MENU_EXIT, 5, "Выход")
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
+                MENU_PROGRAMS -> showProgramsDialog()
+                MENU_UI_SIZE -> showUiSizeDialog()
+                MENU_STORAGE -> AlertDialog.Builder(this)
+                    .setTitle("Файлы телефона")
+                    .setMessage("Память телефона появится в проводнике как «Телефон» (/sdcard). " +
+                        "Для этого рабочий стол перезапустится, открытые программы закроются.")
+                    .setPositiveButton("Разрешить") { _, _ ->
+                        requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_LATER)
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
                 MENU_TERMINAL -> startActivity(Intent(this, TerminalActivity::class.java))
                 MENU_RESTART -> restartDesktop()
                 MENU_NETWORK -> AlertDialog.Builder(this)
@@ -311,6 +371,7 @@ class DesktopActivity : Activity(), ServiceConnection {
                     .setMessage(svc.networkSummary())
                     .setPositiveButton(android.R.string.ok, null)
                     .show()
+                MENU_SSH -> showSshDialog()
                 MENU_WAKE -> svc.toggleWakeLock()
                 MENU_BATTERY -> startActivity(
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
@@ -320,6 +381,122 @@ class DesktopActivity : Activity(), ServiceConnection {
             true
         }
         menu.show()
+    }
+
+    /**
+     * A newer APK may carry a newer system image (new tools, fixes). Replacing
+     * it wipes what the user installed, so ask once per version, never force.
+     */
+    private fun offerSystemUpdate() {
+        val svc = service ?: return
+        val bundled = RootfsInstaller.bundledVersion(this)
+        if (bundled == "unknown" || svc.env.installedVersion == bundled) return
+        if (prefs.getString(PREF_DECLINED_UPDATE, null) == bundled) return
+        AlertDialog.Builder(this)
+            .setTitle("Новая версия системы")
+            .setMessage(
+                "В этой версии Okno обновлён Linux: новые возможности и исправления.\n\n" +
+                    "Обновление переустановит систему: программы, установленные вами, и файлы в " +
+                    "домашней папке (/root) будут удалены. Файлы телефона (/sdcard) не затрагиваются."
+            )
+            .setPositiveButton("Обновить") { _, _ -> reinstallSystem() }
+            .setNegativeButton("Не сейчас") { _, _ ->
+                prefs.edit().putString(PREF_DECLINED_UPDATE, bundled).apply()
+            }
+            .show()
+    }
+
+    private fun reinstallSystem() {
+        val svc = service ?: return
+        disconnect()
+        svc.stopDesktop()
+        svc.stopSsh()
+        svc.sessions.toList().forEach { svc.removeSession(it) }
+        install()
+    }
+
+    private fun showUiSizeDialog() {
+        val current = prefs.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
+        AlertDialog.Builder(this)
+            .setTitle("Размер интерфейса")
+            .setSingleChoiceItems(UI_SIZES.map { it.second }.toTypedArray(), UI_SIZES.indexOfFirst { it.first == current }) { dialog, which ->
+                prefs.edit().putInt(PREF_SHORT_SIDE, UI_SIZES[which].first).apply()
+                // Applied live: the desktop changes resolution, nothing restarts.
+                resizeDesktop(desktopView.width, desktopView.height)
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun hasStorage() =
+        checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        when (requestCode) {
+            REQUEST_STORAGE_FIRST -> startDesktop()
+            REQUEST_STORAGE_LATER -> if (hasStorage()) restartDesktop()
+        }
+    }
+
+    /** One tap installs: the picked programs go to okno-install in a visible terminal. */
+    private fun showProgramsDialog() {
+        val picked = BooleanArray(PROGRAMS.size)
+        AlertDialog.Builder(this)
+            .setTitle("Установить программы")
+            .setMultiChoiceItems(PROGRAMS.map { it.second }.toTypedArray(), picked) { _, which, checked ->
+                picked[which] = checked
+            }
+            .setPositiveButton("Установить") { _, _ ->
+                val names = PROGRAMS.filterIndexed { i, _ -> picked[i] }.map { it.first }
+                if (names.isEmpty()) return@setPositiveButton
+                val script = "okno-install ${names.joinToString(" ")}; " +
+                    "echo; read -r -p 'Нажмите Enter, чтобы вернуться на рабочий стол' _"
+                startActivity(
+                    Intent(this, TerminalActivity::class.java)
+                        .putExtra(TerminalActivity.EXTRA_COMMAND, arrayOf("/bin/bash", "-lc", script))
+                )
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showSshDialog() {
+        val svc = service ?: return
+        val builder = AlertDialog.Builder(this).setTitle("Удалённый доступ (SSH)")
+        if (!svc.isSshRunning) {
+            builder.setMessage(
+                "Управляйте Linux на телефоне с компьютера: терминал по SSH и файлы по SFTP " +
+                    "(WinSCP, FileZilla, scp).\n\nКомпьютер должен быть в той же Wi‑Fi сети."
+            )
+                .setPositiveButton("Включить") { _, _ ->
+                    svc.startSsh()
+                    showSshDialog()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            return
+        }
+        val addresses = svc.sshAddresses()
+        val port = LinuxService.SSH_PORT
+        val command = addresses.firstOrNull()?.let { "ssh root@$it -p $port" } ?: "ssh root@<адрес телефона> -p $port"
+        val message = buildString {
+            append("Команда для компьютера:\n  $command\n\n")
+            append("Пароль: ${svc.sshPassword}\n\n")
+            if (addresses.size > 1) append("Другие адреса телефона: ${addresses.drop(1).joinToString()}\n\n")
+            if (addresses.isEmpty()) append("Телефон сейчас не в сети.\n\n")
+            append("Файлы: SFTP на том же адресе и порту $port.\n")
+            append("Пока SSH включён, телефон не отключает Wi‑Fi при погашенном экране.")
+        }
+        builder.setMessage(message)
+            .setPositiveButton("Скопировать команду") { _, _ ->
+                clipboard.setPrimaryClip(ClipData.newPlainText("SSH", command))
+            }
+            .setNegativeButton("Выключить") { _, _ -> svc.stopSsh() }
+            .setNeutralButton("Новый пароль") { _, _ ->
+                svc.newSshPassword()
+                showSshDialog()
+            }
+            .show()
     }
 
     @Deprecated("Activity is the platform class; targetSdk 28 still routes Back here")
@@ -371,7 +548,6 @@ class DesktopActivity : Activity(), ServiceConnection {
     companion object {
         private const val TAG = "Okno"
         private const val DESKTOP_DPI = 132
-        private const val TARGET_SHORT_SIDE = 720f
         private const val CONNECT_TIMEOUT_MS = 60_000L
         private const val RETRY_DELAY_MS = 300L
         private const val MENU_TERMINAL = 1
@@ -380,5 +556,29 @@ class DesktopActivity : Activity(), ServiceConnection {
         private const val MENU_WAKE = 4
         private const val MENU_BATTERY = 5
         private const val MENU_EXIT = 6
+        private const val MENU_SSH = 7
+        private const val MENU_PROGRAMS = 8
+        private const val MENU_UI_SIZE = 9
+        private const val MENU_STORAGE = 10
+        private const val REQUEST_STORAGE_FIRST = 1
+        private const val REQUEST_STORAGE_LATER = 2
+        private const val PREF_SHORT_SIDE = "desktop_short_side"
+        private const val PREF_DECLINED_UPDATE = "declined_system_update"
+
+        /** Desktop height (landscape) for each interface size: fewer pixels, bigger UI. */
+        private val UI_SIZES = listOf(600 to "Крупный", 720 to "Обычный", 900 to "Мелкий")
+
+        /** okno-install names (rootfs-overlay/usr/local/bin/okno-install) and labels. */
+        private val PROGRAMS = listOf(
+            "vscode" to "VS Code — редактор кода",
+            "firefox" to "Firefox — браузер",
+            "chromium" to "Chromium — браузер",
+            "python" to "Python 3 + pip",
+            "node" to "Node.js + npm",
+            "git" to "Git",
+            "cpp" to "C/C++: gcc, make, cmake, gdb",
+            "java" to "Java (JDK)",
+            "geany" to "Geany — лёгкая среда разработки",
+        )
     }
 }

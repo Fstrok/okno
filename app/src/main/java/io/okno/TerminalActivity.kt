@@ -43,6 +43,7 @@ class TerminalActivity : Activity(), ServiceConnection {
     private val maxFontSize by lazy { sp(36f) }
 
     private val currentSession: TerminalSession? get() = terminalView.currentSession
+    private val commandSessions = mutableSetOf<TerminalSession>()
 
     private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = finishAndRemoveTask()
@@ -101,7 +102,22 @@ class TerminalActivity : Activity(), ServiceConnection {
             finish()
             return
         }
+        // A command handed over by the desktop (e.g. installing programs) gets
+        // its own session, once: the intent is consumed so rotation won't rerun it.
+        intent.getStringArrayExtra(EXTRA_COMMAND)?.let { command ->
+            intent.removeExtra(EXTRA_COMMAND)
+            val session = svc.createSession(command.toList())
+            commandSessions += session
+            showSession(session)
+            return
+        }
         showSession(currentSession?.takeIf { it in svc.sessions } ?: svc.sessions.lastOrNull() ?: svc.createSession())
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (service != null) attachSessions()
     }
 
     private fun showSession(session: TerminalSession) {
@@ -259,7 +275,13 @@ class TerminalActivity : Activity(), ServiceConnection {
         }
 
         override fun onTitleChanged(changedSession: TerminalSession) = Unit
-        override fun onSessionFinished(finishedSession: TerminalSession) = Unit
+        override fun onSessionFinished(finishedSession: TerminalSession) {
+            // A command run for the desktop (installing programs) that went
+            // fine closes by itself; failures stay on screen to be read.
+            if (commandSessions.remove(finishedSession) && finishedSession.exitStatus == 0) {
+                closeSession(finishedSession)
+            }
+        }
 
         override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
             getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Okno", text))
@@ -294,6 +316,8 @@ class TerminalActivity : Activity(), ServiceConnection {
     }
 
     companion object {
+        /** String array: a command to run in a new session instead of a shell. */
+        const val EXTRA_COMMAND = "io.okno.COMMAND"
         private const val TAG = "Okno"
         private const val PREF_FONT_SIZE = "font_size"
         private const val REQUEST_STORAGE = 1

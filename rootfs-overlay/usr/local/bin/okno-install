@@ -1,0 +1,62 @@
+#!/bin/bash
+# Installs the programs picked in the Okno app (☰ → Программы).
+#   okno-install firefox vscode python ...
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+declare -A PACKAGES=(
+  [firefox]="firefox-esr firefox-esr-l10n-ru"
+  [chromium]="chromium chromium-l10n"
+  [python]="python3 python3-pip python3-venv"
+  [node]="nodejs npm"
+  [git]="git openssh-client"
+  [cpp]="build-essential gdb cmake"
+  [java]="default-jdk"
+  [geany]="geany"
+)
+
+say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+
+packages=()
+vscode=false
+for name in "$@"; do
+  case "$name" in
+    vscode) vscode=true ;;
+    *) [ -n "${PACKAGES[$name]:-}" ] || { echo "неизвестная программа: $name" >&2; exit 2; }
+       packages+=(${PACKAGES[$name]}) ;;
+  esac
+done
+
+say "Обновляю список пакетов"
+apt-get update
+
+if $vscode; then
+  say "Скачиваю VS Code (arm64) с сайта Microsoft"
+  curl -fL --retry 3 -o /tmp/vscode.deb "https://update.code.visualstudio.com/latest/linux-deb-arm64/stable"
+  packages+=(/tmp/vscode.deb)
+fi
+
+if [ ${#packages[@]} -gt 0 ]; then
+  say "Устанавливаю: $*"
+  apt-get install -y --no-install-recommends "${packages[@]}"
+fi
+rm -f /tmp/vscode.deb
+
+# Chromium and Electron apps (VS Code) need their sandbox off under proot,
+# and refuse to run as root without it.
+if [ -d /etc/chromium.d ]; then
+  echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-gpu-sandbox"' > /etc/chromium.d/okno
+fi
+if [ -x /usr/share/code/code ]; then
+  cat > /usr/local/bin/code <<'WRAP'
+#!/bin/sh
+# VS Code as root under proot: no sandbox, and an explicit data dir.
+exec /usr/share/code/code --no-sandbox --disable-gpu-sandbox --user-data-dir=/root/.config/Code "$@"
+WRAP
+  chmod 755 /usr/local/bin/code
+  for f in /usr/share/applications/code*.desktop; do
+    [ -f "$f" ] && sed -i 's#^Exec=/usr/share/code/code#Exec=/usr/local/bin/code#' "$f"
+  done
+fi
+
+say "Готово. Программы появились в меню «Пуск»."
