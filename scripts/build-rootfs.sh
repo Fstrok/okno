@@ -100,9 +100,11 @@ EOF2
   cp -r "$ROOT_DIR/rootfs-overlay/." "$FS/"
   chmod 755 "$FS/usr/local/bin/"*
 
-  # LD_PRELOAD shim that lets sftp-server run under proot (native/nodumpable.c).
-  "${CC_AARCH64:-aarch64-linux-gnu-gcc}" -shared -fPIC -O2 -Wall \
-    -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
+  # Small native helpers (native/): an LD_PRELOAD shim that lets sftp-server
+  # run under proot, and the probe okno-desktop uses to pick a free display.
+  CC="${CC_AARCH64:-aarch64-linux-gnu-gcc}"
+  "$CC" -shared -fPIC -O2 -Wall -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
+  "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-free-display" "$ROOT_DIR/native/free-display.c"
 
   # Every phone must get its own SSH host keys (okno-ssh creates them).
   rm -f "$FS"/etc/ssh/ssh_host_*

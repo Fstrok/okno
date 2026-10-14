@@ -1,13 +1,13 @@
 #!/bin/sh
-# Starts the desktop for the Okno app: Xvnc as display :1, reachable only
-# through a Unix socket inside the app's private storage, then XFCE on it.
+# Starts the desktop for the Okno app: Xvnc reachable only through a Unix
+# socket inside the app's private storage, then XFCE on it.
 #   okno-desktop WIDTH HEIGHT DPI
 W=${1:-1600}
 H=${2:-900}
 DPI=${3:-120}
 SOCK_DIR=/tmp/.okno
 
-export DISPLAY=:1 HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
+export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
 export LANG=ru_RU.UTF-8 LANGUAGE=ru_RU:ru
 export XDG_RUNTIME_DIR=/tmp/runtime-root XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
 export NO_AT_BRIDGE=1
@@ -19,21 +19,32 @@ mkdir -p "$SOCK_DIR" "$XDG_RUNTIME_DIR" /tmp/.X11-unix
 chmod 700 "$SOCK_DIR" "$XDG_RUNTIME_DIR"
 chmod 1777 /tmp/.X11-unix
 
-# A desktop from an earlier run may have outlived its proot: stop it, or the
-# new X server cannot take display :1.
-# Only if that PID still is an X server: PIDs get reused.
-old=$(tr -dc 0-9 < /tmp/.X1-lock 2>/dev/null)
-if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q Xvnc; then
-  kill "$old"
-  sleep 1
-fi
+# A desktop from an earlier run may have outlived its proot: stop it, or it
+# keeps its display. Only if that PID still is an X server: PIDs get reused.
+for lock in /tmp/.X*-lock; do
+  [ -f "$lock" ] || continue
+  old=$(tr -dc 0-9 < "$lock")
+  if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q Xvnc; then
+    kill "$old"
+    sleep 1
+  fi
+  rm -f "$lock"
+done
 pkill -x xfce4-session 2>/dev/null
-rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 "$SOCK_DIR/vnc.sock" /root/.ICEauthority
+rm -f /tmp/.X11-unix/X* "$SOCK_DIR/vnc.sock" /root/.ICEauthority
 
-# Only the private Unix sockets: no TCP and no abstract-namespace socket
-# (those would be reachable by every app on the phone). The phone's clipboard
-# follows explicit copies (CLIPBOARD), not every mouse selection (PRIMARY).
-Xvnc :1 -geometry "${W}x${H}" -depth 24 -dpi "$DPI" \
+# X clients try the abstract socket @/tmp/.X11-unix/X<n> first, and those
+# names are shared by all apps on the phone: if another app (a VNC server in
+# Termux, say) holds :1, our clients get "Permission denied" and never reach
+# our socket. So take the first display number nobody else uses.
+D=$(okno-free-display 1) || D=1
+export DISPLAY=:$D
+echo "okno-desktop: display :$D"
+
+# Only private Unix socket files: no TCP and no abstract socket of our own.
+# The phone's clipboard follows explicit copies (CLIPBOARD), not every mouse
+# selection (PRIMARY).
+Xvnc ":$D" -geometry "${W}x${H}" -depth 24 -dpi "$DPI" \
   -rfbunixpath "$SOCK_DIR/vnc.sock" -rfbport -1 -SecurityTypes None \
   -AlwaysShared -AcceptSetDesktopSize -nolisten tcp -nolisten local \
   -SendPrimary=0 &
@@ -41,7 +52,7 @@ XVNC=$!
 trap 'kill $XVNC 2>/dev/null' EXIT INT TERM
 
 i=0
-while [ ! -S /tmp/.X11-unix/X1 ] && [ $i -lt 200 ]; do
+while [ ! -S "/tmp/.X11-unix/X$D" ] && [ $i -lt 200 ]; do
   sleep 0.1
   i=$((i + 1))
 done
