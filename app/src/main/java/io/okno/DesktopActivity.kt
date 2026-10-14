@@ -32,6 +32,7 @@ import android.widget.Button
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import io.okno.desktop.DesktopView
 import io.okno.desktop.Keysyms
 import io.okno.desktop.RfbClient
@@ -290,14 +291,41 @@ class DesktopActivity : Activity(), ServiceConnection {
     private var lastClipboard: String? = null
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { pushPhoneClipboard() }
 
+    private fun phoneClipboardText(): String? = runCatching {
+        clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+    }.getOrNull()
+
     private fun pushPhoneClipboard() {
         val client = desktopView.client ?: return
-        val text = runCatching {
-            clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
-        }.getOrNull()
+        val text = phoneClipboardText()
         if (text.isNullOrEmpty() || text == lastClipboard) return
         lastClipboard = text
         sendQueue.execute { runCatching { client.sendClipboard(text) } }
+    }
+
+    /**
+     * The 📋 key: what was copied on the phone goes to the desktop and is
+     * pasted where the cursor is. Shift+Insert pastes in GTK and Qt programs,
+     * browsers, Windows programs and terminals alike (Xvnc sets the PRIMARY
+     * selection too, which terminals paste with it).
+     */
+    private fun pasteFromPhone() {
+        val client = desktopView.client ?: return
+        val text = phoneClipboardText()
+        if (text.isNullOrEmpty()) {
+            Toast.makeText(this, "Буфер обмена телефона пуст", Toast.LENGTH_SHORT).show()
+            return
+        }
+        lastClipboard = text
+        sendQueue.execute {
+            runCatching {
+                client.sendClipboard(text)
+                client.sendKey(Keysyms.SHIFT_L, true)
+                client.sendKey(Keysyms.INSERT, true)
+                client.sendKey(Keysyms.INSERT, false)
+                client.sendKey(Keysyms.SHIFT_L, false)
+            }
+        }
     }
 
     private fun onDesktopClipboard(text: String) {
@@ -338,6 +366,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         override fun onButton(id: String, anchor: View) {
             when (id) {
                 ExtraKeysView.BUTTON_KEYBOARD -> desktopView.toggleKeyboard()
+                ExtraKeysView.BUTTON_PASTE -> pasteFromPhone()
                 ExtraKeysView.BUTTON_MENU -> showMenu(anchor)
             }
         }

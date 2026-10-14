@@ -185,6 +185,8 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
                 sendExtendedClipboard(CLIP_CAPS or CLIP_REQUEST or CLIP_PEEK or CLIP_NOTIFY or CLIP_PROVIDE or CLIP_TEXT) {
                     it.putInt(MAX_CLIPBOARD_BYTES)
                 }
+                // Text copied on the phone before the server was ready.
+                if (localClipboard != null) sendExtendedClipboard(CLIP_NOTIFY or CLIP_TEXT)
             }
             flags and CLIP_REQUEST != 0 -> if (flags and CLIP_TEXT != 0) provideClipboard()
             flags and CLIP_PEEK != 0 -> sendExtendedClipboard(CLIP_NOTIFY or if (localClipboard != null) CLIP_TEXT else 0)
@@ -200,18 +202,15 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
         }
     }
 
-    /** Offers text copied on the phone to the desktop. */
+    /**
+     * Offers text copied on the phone to the desktop. Right after connecting,
+     * before the server has announced the Extended Clipboard, the text waits
+     * and is offered then: sent any earlier it would be lost (plain cut text
+     * carries Latin-1 only) or land in the middle of the handshake.
+     */
     fun sendClipboard(text: String) {
         localClipboard = text
-        if (extendedClipboard) {
-            sendExtendedClipboard(CLIP_NOTIFY or CLIP_TEXT)
-        } else if (text.all { it.code < 256 }) {
-            val bytes = text.replace("\n", "\r\n").toByteArray(Charsets.ISO_8859_1)
-            write { out ->
-                out.write(ByteBuffer.allocate(8).put(6).put(0).putShort(0).putInt(bytes.size).array())
-                out.write(bytes)
-            }
-        }
+        if (extendedClipboard) sendExtendedClipboard(CLIP_NOTIFY or CLIP_TEXT)
     }
 
     private fun provideClipboard() {

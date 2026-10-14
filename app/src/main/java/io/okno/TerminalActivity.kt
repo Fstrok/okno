@@ -219,7 +219,10 @@ class TerminalActivity : Activity(), ServiceConnection {
         }
 
         override fun onButton(id: String, anchor: View) {
-            if (id == ExtraKeysView.BUTTON_MENU) showMenu(anchor)
+            when (id) {
+                ExtraKeysView.BUTTON_MENU -> showMenu(anchor)
+                ExtraKeysView.BUTTON_PASTE -> sessionClient.onPasteTextFromClipboard(currentSession)
+            }
         }
     }
 

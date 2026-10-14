@@ -138,6 +138,7 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
 
         const val BUTTON_MENU = "menu"
         const val BUTTON_KEYBOARD = "keyboard"
+        const val BUTTON_PASTE = "paste"
 
         private val ARROWS = listOf(
             "←" to Action.Key(KeyEvent.KEYCODE_DPAD_LEFT),
@@ -155,6 +156,8 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
 
         val TERMINAL_KEYS: List<Pair<String, Action>> = listOf(
             "☰" to Action.Button(BUTTON_MENU),
+            "📋" to Action.Button(BUTTON_PASTE),
+            "↵" to Action.Key(KeyEvent.KEYCODE_ENTER),
             "ESC" to Action.Key(KeyEvent.KEYCODE_ESCAPE),
             "TAB" to Action.Key(KeyEvent.KEYCODE_TAB),
             "CTRL" to Action.Toggle(Modifier.CTRL),
@@ -169,6 +172,8 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
         val DESKTOP_KEYS: List<Pair<String, Action>> = listOf(
             "☰" to Action.Button(BUTTON_MENU),
             "⌨" to Action.Button(BUTTON_KEYBOARD),
+            "📋" to Action.Button(BUTTON_PASTE),
+            "↵" to Action.Key(KeyEvent.KEYCODE_ENTER),
             "ESC" to Action.Key(KeyEvent.KEYCODE_ESCAPE),
             "TAB" to Action.Key(KeyEvent.KEYCODE_TAB),
             "CTRL" to Action.Toggle(Modifier.CTRL),

@@ -7,6 +7,7 @@ object Keysyms {
     const val BACKSPACE = 0xff08
     const val RETURN = 0xff0d
     const val DELETE = 0xffff
+    const val INSERT = 0xff63
     const val SHIFT_L = 0xffe1
     const val CONTROL_L = 0xffe3
     const val ALT_L = 0xffe9
@@ -27,7 +28,7 @@ object Keysyms {
         KeyEvent.KEYCODE_PAGE_UP to 0xff55,
         KeyEvent.KEYCODE_PAGE_DOWN to 0xff56,
         KeyEvent.KEYCODE_MOVE_END to 0xff57,
-        KeyEvent.KEYCODE_INSERT to 0xff63,
+        KeyEvent.KEYCODE_INSERT to INSERT,
         KeyEvent.KEYCODE_MENU to 0xff67,
         KeyEvent.KEYCODE_SHIFT_LEFT to SHIFT_L,
         KeyEvent.KEYCODE_SHIFT_RIGHT to 0xffe2,
