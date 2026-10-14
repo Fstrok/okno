@@ -15,23 +15,53 @@ declare -A PACKAGES=(
   [geany]="geany"
 )
 
+# Windows programs: Hangover, a Wine built for ARM64 that emulates only the
+# program's own x86 code (x86-64 through FEX, 32-bit x86 through Box64),
+# while Wine itself runs natively. Built for Debian 13 by the Hangover project.
+HANGOVER_VERSION=11.16
+HANGOVER_URL="https://github.com/AndreRH/hangover/releases/download/hangover-$HANGOVER_VERSION/hangover_${HANGOVER_VERSION}_debian13_trixie_arm64.tar"
+# Libraries Wine only recommends but Windows programs commonly need: TLS for
+# the internet, X11 extensions for windows, cursors and screen size, OpenGL.
+WINDOWS_EXTRAS="libgnutls30t64 libfreetype6 libfontconfig1 libdbus-1-3 libxcursor1 libxi6 libxrandr2
+  libxrender1 libxinerama1 libxcomposite1 libxfixes3 libxxf86vm1 libgl1 libglx-mesa0 libgl1-mesa-dri"
+# Mesa's software OpenGL, left out of the image (see /etc/dpkg/dpkg.cfg.d/okno-slim).
+MESA_PACKAGES="libllvm19 mesa-libgallium libgl1-mesa-dri libz3-4"
+
 say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 packages=()
 vscode=false
 claude=false
+windows=false
 for name in "$@"; do
   case "$name" in
     vscode) vscode=true ;;
     claude) claude=true ;;
+    windows) windows=true ;;
     *) [ -n "${PACKAGES[$name]:-}" ] || { echo "неизвестная программа: $name" >&2; exit 2; }
        packages+=(${PACKAGES[$name]}) ;;
   esac
 done
 
-if [ ${#packages[@]} -gt 0 ] || $vscode; then
+if [ ${#packages[@]} -gt 0 ] || $vscode || $windows; then
   say "Обновляю список пакетов"
   apt-get update
+fi
+
+if $windows; then
+  say "Скачиваю Hangover $HANGOVER_VERSION: Wine для ARM (около 290 МБ)"
+  rm -rf /tmp/hangover && mkdir -p /tmp/hangover
+  curl -fL --retry 3 -# -o /tmp/hangover/hangover.tar "$HANGOVER_URL"
+  tar -xf /tmp/hangover/hangover.tar -C /tmp/hangover
+  packages+=(/tmp/hangover/*.deb $WINDOWS_EXTRAS)
+
+  say "Включаю программный OpenGL (Mesa) для Windows-программ"
+  sed -i '/libLLVM\|libgallium\|libz3\|\/dri\//d' /etc/dpkg/dpkg.cfg.d/okno-slim
+  reinstall=()
+  for p in $MESA_PACKAGES; do
+    if dpkg -s "$p" > /dev/null 2>&1; then reinstall+=("$p"); fi
+  done
+  if [ ${#reinstall[@]} -gt 0 ]; then apt-get install -y --reinstall --no-install-recommends "${reinstall[@]}"; fi
 fi
 
 if $vscode; then
@@ -44,7 +74,7 @@ if [ ${#packages[@]} -gt 0 ]; then
   say "Устанавливаю: $*"
   apt-get install -y --no-install-recommends "${packages[@]}"
 fi
-rm -f /tmp/vscode.deb
+rm -rf /tmp/vscode.deb /tmp/hangover
 
 # Okno's own Start menu entry for Chromium (it installs on first use) stays;
 # hide the package's duplicate. Chromium's flags live in /etc/chromium.d/okno.
@@ -72,6 +102,20 @@ WRAP
   for f in /usr/share/applications/code*.desktop; do
     [ -f "$f" ] && sed -i 's#^Exec=/usr/share/code/code#Exec=/usr/local/bin/code#' "$f"
   done
+fi
+
+if $windows; then
+  say "Готовлю Windows (первый запуск Wine, около минуты)"
+  # The wrapper (/usr/local/bin/wine) adds Okno's speed settings. Mono (.NET)
+  # and Gecko (HTML) are left out here; Wine offers them when a program needs them.
+  WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY= wine wineboot -i
+  # 125% scale: Windows programs readable on a phone screen; smooth fonts.
+  wine reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 120 /f > /dev/null
+  wine reg add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d 2 /f > /dev/null
+  wine reg add 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 2 /f > /dev/null
+  wineserver -w
+  say "Windows-программы готовы: откройте .exe в проводнике двойным нажатием."
+  echo "Для 3D-графики перезапустите рабочий стол: ☰ → Перезапустить рабочий стол."
 fi
 
 say "Готово. Программы появились в меню «Пуск»."

@@ -1,0 +1,9 @@
+[Default Applications]
+application/x-ms-dos-executable=okno-windows.desktop
+application/x-msdownload=okno-windows.desktop
+application/vnd.microsoft.portable-executable=okno-windows.desktop
+application/x-msi=okno-windows.desktop
+application/x-ms-shortcut=okno-windows.desktop
+application/x-bat=okno-windows.desktop
+application/x-dosexec=okno-windows.desktop
+application/x-ms-ne-executable=okno-windows.desktop

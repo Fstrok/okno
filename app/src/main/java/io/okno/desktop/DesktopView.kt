@@ -21,6 +21,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import io.okno.SafeArea
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -59,6 +60,7 @@ class DesktopView(context: Context, attrs: AttributeSet?) : View(context, attrs)
 
     // View transform: desktop pixel = (view pixel - offset) / scale.
     private var fullHeight = 0 // view height without the on-screen keyboard
+    private val safe = Rect() // margins kept clear of rounded corners and the camera
     private var lastTouchDesktopY = 0
     private var fitScale = 1f
     private var zoom = 1f
@@ -92,21 +94,28 @@ class DesktopView(context: Context, attrs: AttributeSet?) : View(context, attrs)
     }
 
     override fun onResizeSupported() {
-        main.post { onSizeChanged?.invoke(width, fullHeight) }
+        main.post { onSizeChanged?.invoke(contentWidth, contentHeight) }
     }
+
+    /** Size the desktop is shown at: the view without the keyboard and the safe-area margins. */
+    val contentWidth: Int get() = width - safe.left - safe.right
+    val contentHeight: Int get() = fullHeight - safe.top - safe.bottom
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         // The keyboard only takes height away. Keep the desktop's resolution
         // and scale, and keep the last touched spot in view instead.
         val keyboardResize = w == oldw && h < fullHeight
-        if (!keyboardResize) fullHeight = h
+        if (!keyboardResize) {
+            fullHeight = h
+            SafeArea.insets(this, safe)
+        }
         updateTransform()
         if (keyboardResize) {
             offsetY = height / 2f - lastTouchDesktopY * scale
             clampOffset()
         }
-        if (w > 0 && h > 0 && !keyboardResize) onSizeChanged?.invoke(w, fullHeight)
+        if (w > 0 && h > 0 && !keyboardResize) onSizeChanged?.invoke(contentWidth, contentHeight)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -140,19 +149,25 @@ class DesktopView(context: Context, attrs: AttributeSet?) : View(context, attrs)
         val fbW = framebuffer.width
         val fbH = framebuffer.height
         if (fbW == 0 || fbH == 0 || width == 0 || height == 0) return
-        fitScale = minOf(width.toFloat() / fbW, maxOf(height, fullHeight).toFloat() / fbH)
+        fitScale = minOf(contentWidth.toFloat() / fbW, (maxOf(height, fullHeight) - safe.top - safe.bottom).toFloat() / fbH)
         clampOffset()
     }
 
     private fun clampOffset() {
         val contentW = framebuffer.width * scale
         val contentH = framebuffer.height * scale
-        offsetX = if (contentW <= width) (width - contentW) / 2 else offsetX.coerceIn(width - contentW, 0f)
-        offsetY = if (contentH <= height) (height - contentH) / 2 else offsetY.coerceIn(height - contentH, 0f)
+        val areaW = (width - safe.left - safe.right).toFloat()
+        val areaH = (height - safe.top - safe.bottom).toFloat()
+        offsetX = if (contentW <= areaW) safe.left + (areaW - contentW) / 2
+        else offsetX.coerceIn(safe.left + areaW - contentW, safe.left.toFloat())
+        offsetY = if (contentH <= areaH) safe.top + (areaH - contentH) / 2
+        else offsetY.coerceIn(safe.top + areaH - contentH, safe.top.toFloat())
     }
 
-    private fun desktopX(viewX: Float) = ((viewX - offsetX) / scale).toInt()
-    private fun desktopY(viewY: Float) = ((viewY - offsetY) / scale).toInt()
+    // A touch in the margins lands on the nearest desktop edge, so the close
+    // button in a corner is under the finger even when it touches the rounding.
+    private fun desktopX(viewX: Float) = ((viewX - offsetX) / scale).toInt().coerceIn(0, maxOf(framebuffer.width - 1, 0))
+    private fun desktopY(viewY: Float) = ((viewY - offsetY) / scale).toInt().coerceIn(0, maxOf(framebuffer.height - 1, 0))
 
     // ---- touch → mouse ----
 

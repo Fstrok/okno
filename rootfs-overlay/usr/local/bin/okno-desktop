@@ -62,4 +62,7 @@ done
 # Xvnc remaps spare keys on the fly and apps can read the wrong letter.
 setxkbmap -layout okno
 
+# Keeps windows inside the screen and opens big ones maximized (phone screen).
+okno-wm-guard &
+
 dbus-launch --exit-with-session startxfce4

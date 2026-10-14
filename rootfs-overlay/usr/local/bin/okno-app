@@ -1,16 +1,25 @@
 #!/bin/sh
-# Start menu launcher for programs installed on first use (okno-install).
+# Launcher for programs installed on first use (okno-install): installs the
+# program if it is missing, then starts it.
 #   okno-app NAME [ARGS...]
 name=$1
 shift
 case "$name" in
   chromium) binary=/usr/bin/chromium ;;
+  # Windows programs through Hangover's Wine, with Okno's speed settings.
+  windows) binary=/usr/bin/wine; . /etc/okno/windows.env ;;
   *) echo "okno-app: неизвестная программа $name" >&2; exit 2 ;;
 esac
 if [ ! -x "$binary" ]; then
-  # Visible progress; on failure the window stays open so the error can be read.
-  xfce4-terminal --disable-server --title "Установка: $name" --geometry 100x30 -x sh -c \
-    "okno-install $name || { echo; echo 'Не получилось. Нажмите Enter, чтобы закрыть.'; read _; exit 1; }" || exit 1
+  if [ -t 0 ]; then
+    # Started from a terminal: install right there.
+    okno-install "$name" || exit 1
+  else
+    # Started from the desktop: show progress; on failure the window stays
+    # open so the error can be read.
+    xfce4-terminal --disable-server --title "Установка: $name" --geometry 100x30 -x sh -c \
+      "okno-install $name || { echo; echo 'Не получилось. Нажмите Enter, чтобы закрыть.'; read _; exit 1; }" || exit 1
+  fi
   [ -x "$binary" ] || exit 1
 fi
 exec "$binary" "$@"

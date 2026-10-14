@@ -3,11 +3,11 @@
 # debian:trixie-slim arm64 image (scripts/fetch-rootfs.sh) plus the XFCE
 # desktop, TigerVNC and Okno's configuration. Runs on any Linux host:
 # arm64 natively, x86_64 through proot + qemu-user.
-# Host packages: gtk-update-icon-cache, an aarch64 C compiler (CC_AARCH64,
-# default aarch64-linux-gnu-gcc), qemu-user-static on x86_64, and a
-# proot that understands statx (PROOT=..., see scripts/build-proot.sh): the
-# 5.1.0 shipped by Debian/Ubuntu does not, so file checks inside the image
-# would silently look at the host.
+# Host packages: gtk-update-icon-cache, libx11-dev (headers only), an aarch64
+# C compiler (CC_AARCH64, default aarch64-linux-gnu-gcc), qemu-user-static on
+# x86_64, and a proot that understands statx (PROOT=..., see
+# scripts/build-proot.sh): the 5.1.0 shipped by Debian/Ubuntu does not, so
+# file checks inside the image would silently look at the host.
 #
 #   scripts/build-rootfs.sh   →  app/src/main/assets/rootfs.tgz
 set -euo pipefail
@@ -105,12 +105,19 @@ EOF2
   chmod 755 "$FS/usr/local/bin/"*
 
   # Small native helpers (native/): an LD_PRELOAD shim that lets sftp-server
-  # run under proot, the probe okno-desktop uses to pick a free display, and
-  # the GPU check of okno-gfx-test.
+  # run under proot, the probe okno-desktop uses to pick a free display, the
+  # GPU check of okno-gfx-test, and the window guard of the desktop.
   CC="${CC_AARCH64:-aarch64-linux-gnu-gcc}"
   "$CC" -shared -fPIC -O2 -Wall -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-free-display" "$ROOT_DIR/native/free-display.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-gpu-probe" "$ROOT_DIR/native/gpu-probe.c"
+  # Xlib's headers do not depend on the CPU: the host's (libx11-dev) are used,
+  # alone, with the image's own arm64 libX11 to link against.
+  xinc="$WORK/xinclude"
+  mkdir -p "$xinc"
+  ln -sfn /usr/include/X11 "$xinc/X11"
+  "$CC" -O2 -Wall -isystem "$xinc" -o "$FS/usr/local/bin/okno-wm-guard" "$ROOT_DIR/native/wm-guard.c" \
+    "$FS/usr/lib/aarch64-linux-gnu/libX11.so.6" -Wl,-rpath-link,"$FS/usr/lib/aarch64-linux-gnu"
 
   # Every phone must get its own SSH host keys (okno-ssh creates them).
   rm -f "$FS"/etc/ssh/ssh_host_*

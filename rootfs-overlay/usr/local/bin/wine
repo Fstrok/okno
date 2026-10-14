@@ -1,0 +1,5 @@
+#!/bin/sh
+# Wine for Windows programs: installs Hangover on first use and adds Okno's
+# speed settings (/etc/okno/windows.env). Wine's own tools (winecfg, ...)
+# start programs through this command too.
+exec okno-app windows "$@"

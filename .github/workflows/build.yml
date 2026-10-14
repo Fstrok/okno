@@ -38,7 +38,7 @@ jobs:
         if: steps.rootfs-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q qemu-user-static gtk-update-icon-cache libtalloc-dev uthash-dev gcc-aarch64-linux-gnu
+          sudo apt-get install -y -q qemu-user-static gtk-update-icon-cache libtalloc-dev uthash-dev gcc-aarch64-linux-gnu libx11-dev
           scripts/build-proot.sh "$RUNNER_TEMP/proot"
           sudo env PROOT="$RUNNER_TEMP/proot/proot" scripts/build-rootfs.sh
           sudo chown -R "$(id -u):$(id -g)" app/src/main/assets

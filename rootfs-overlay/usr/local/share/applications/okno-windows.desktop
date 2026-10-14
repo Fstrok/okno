@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Windows-программа
+Comment=Запуск программ Windows (Wine, ставится при первом запуске)
+Exec=okno-app windows start /unix %f
+Icon=wine
+MimeType=application/x-ms-dos-executable;application/x-dosexec;application/x-ms-ne-executable;application/x-msdownload;application/vnd.microsoft.portable-executable;application/x-msi;application/x-ms-shortcut;application/x-bat;
+NoDisplay=true
+Terminal=false

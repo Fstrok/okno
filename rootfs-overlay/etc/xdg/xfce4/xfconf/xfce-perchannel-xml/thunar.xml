@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Okno: files and folders open with a single tap, as on a phone. -->
+<channel name="thunar" version="1.0">
+  <property name="misc-single-click" type="bool" value="true"/>
+</channel>

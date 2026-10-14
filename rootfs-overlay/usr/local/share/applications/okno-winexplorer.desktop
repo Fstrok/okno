@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Проводник Windows
+Comment=Диск C: программ Windows; отсюда же запускаются установщики
+Exec=okno-app windows explorer
+Icon=system-file-manager
+Categories=System;FileTools;
+Terminal=false

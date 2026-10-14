@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Настройки Windows
+Comment=Версия Windows, графика, диски и библиотеки для Windows-программ (Wine)
+Exec=okno-app windows winecfg
+Icon=preferences-system
+Categories=System;Settings;
+Terminal=false

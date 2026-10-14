@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.net.Uri
@@ -58,6 +59,8 @@ class DesktopActivity : Activity(), ServiceConnection {
     private var socket: LocalSocket? = null
     private var connection: Thread? = null
 
+    private val keysSafe = Rect()
+
     private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             disconnect()
@@ -81,6 +84,13 @@ class DesktopActivity : Activity(), ServiceConnection {
         desktopView.keySender = DesktopView.KeySender(::sendKey)
         desktopView.onSizeChanged = { w, h -> resizeDesktop(w, h) }
         desktopView.onClipboard = ::onDesktopClipboard
+        // In landscape the keys at both ends of the bar sit in the rounded bottom corners.
+        extraKeys.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            SafeArea.insets(v, keysSafe)
+            if (v.paddingLeft != keysSafe.left || v.paddingRight != keysSafe.right) {
+                v.post { v.setPadding(keysSafe.left, 0, keysSafe.right, 0) }
+            }
+        }
         hideSystemBars()
 
         val filter = IntentFilter(LinuxService.ACTION_EXITED)
@@ -182,7 +192,7 @@ class DesktopActivity : Activity(), ServiceConnection {
             return
         }
         if (!svc.isDesktopRunning) {
-            val (w, h) = desktopSizeFor(desktopView.width, desktopView.height)
+            val (w, h) = desktopSizeFor(desktopView.contentWidth, desktopView.contentHeight)
             svc.startDesktop(w, h, DESKTOP_DPI)
             showOverlay(getString(R.string.starting_title), getString(R.string.starting_text), progress = -1)
         }
@@ -424,7 +434,7 @@ class DesktopActivity : Activity(), ServiceConnection {
             .setSingleChoiceItems(UI_SIZES.map { it.second }.toTypedArray(), UI_SIZES.indexOfFirst { it.first == current }) { dialog, which ->
                 prefs.edit().putInt(PREF_SHORT_SIDE, UI_SIZES[which].first).apply()
                 // Applied live: the desktop changes resolution, nothing restarts.
-                resizeDesktop(desktopView.width, desktopView.height)
+                resizeDesktop(desktopView.contentWidth, desktopView.contentHeight)
                 dialog.dismiss()
             }
             .show()
@@ -576,6 +586,7 @@ class DesktopActivity : Activity(), ServiceConnection {
 
         /** okno-install names (rootfs-overlay/usr/local/bin/okno-install) and labels. */
         private val PROGRAMS = listOf(
+            "windows" to "Windows-программы (.exe, 32 и 64 бит)",
             "claude" to "Claude Code — ИИ-помощник в терминале",
             "vscode" to "VS Code — редактор кода",
             "firefox" to "Firefox — браузер",
