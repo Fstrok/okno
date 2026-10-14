@@ -32,6 +32,7 @@ class LinuxService : Service() {
     lateinit var env: LinuxEnvironment
         private set
     private lateinit var network: NetworkConfig
+    private lateinit var links: LinkOpener
     private val binder = LocalBinder()
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -63,6 +64,7 @@ class LinuxService : Service() {
         env = LinuxEnvironment(this)
         network = NetworkConfig(this, env)
         network.startWatching()
+        links = LinkOpener(this, env.rootfs)
         startForeground(NOTIFICATION_ID, buildNotification())
     }
 
@@ -82,6 +84,7 @@ class LinuxService : Service() {
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
         network.stopWatching()
+        links.stop()
         releaseLocks()
         worker.shutdown()
         super.onDestroy()
@@ -139,6 +142,7 @@ class LinuxService : Service() {
     /** Starts Xvnc + XFCE inside Linux (see rootfs-overlay/usr/local/bin/okno-desktop). */
     fun startDesktop(width: Int, height: Int, dpi: Int) {
         if (isDesktopRunning) return
+        links.start()
         desktopSocket.delete()
         desktop = startLinuxProcess(listOf(DESKTOP_LAUNCHER, "$width", "$height", "$dpi"), DESKTOP_LOG)
         updateNotification()
@@ -173,6 +177,7 @@ class LinuxService : Service() {
     /** SSH server on port [SSH_PORT] (see rootfs-overlay/usr/local/bin/okno-ssh). */
     fun startSsh() {
         if (isSshRunning) return
+        links.start()
         val process = startLinuxProcess(listOf(SSH_LAUNCHER), SSH_LOG)
         // The password goes through stdin so it never shows up in a process list.
         process.outputStream.bufferedWriter().use { it.write(sshPassword + "\n") }
@@ -218,6 +223,7 @@ class LinuxService : Service() {
     /** A terminal session running [command] (a login shell by default). */
     fun createSession(command: List<String> = LinuxEnvironment.LOGIN_SHELL): TerminalSession {
         network.writeResolvConf()
+        links.start()
         val session = TerminalSession(
             env.prootPath,
             env.filesDir.absolutePath,

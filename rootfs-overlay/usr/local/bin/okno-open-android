@@ -1,0 +1,17 @@
+#!/bin/sh
+# Opens a link in the phone's browser: the Okno app watches /tmp/.okno/open
+# (LinkOpener) and hands each link to Android. The BROWSER of Linux sessions
+# and the desktop's web browser, so logins of command-line tools (Claude
+# Code, gh, ...) happen where the user is already signed in; their
+# localhost callbacks reach Linux, which shares the phone's network.
+# Local files and other links the phone cannot open go to Chromium here.
+#   okno-open-android URL
+url=$1
+case "$url" in
+  http://*|https://*) ;;
+  *) exec okno-app chromium "$url" ;;
+esac
+dir=/tmp/.okno/open
+mkdir -p "$dir"
+tmp="$dir/.$$.tmp"
+printf '%s\n' "$url" > "$tmp" && mv "$tmp" "$dir/$$-$(date +%s%N).url"

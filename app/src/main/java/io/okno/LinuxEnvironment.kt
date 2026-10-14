@@ -135,6 +135,8 @@ class LinuxEnvironment(context: Context) {
             "COLORTERM=truecolor",
             "LANG=C.UTF-8",
             "TMPDIR=/tmp",
+            // Links (logins of command-line tools too) open in the phone's browser.
+            "BROWSER=okno-open-android",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         )
     }

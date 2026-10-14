@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Браузер телефона
+Comment=Открывает ссылку в браузере Android
+Exec=okno-open-android %u
+Icon=web-browser
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+NoDisplay=true
+Terminal=false

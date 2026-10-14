@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Icon=web-browser
+Type=X-XFCE-Helper
+Name=Браузер телефона
+StartupNotify=false
+X-XFCE-Binaries=okno-open-android;
+X-XFCE-Category=WebBrowser
+X-XFCE-Commands=okno-open-android;
+X-XFCE-CommandsWithParameter=okno-open-android "%s";

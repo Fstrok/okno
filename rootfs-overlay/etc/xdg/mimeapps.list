@@ -7,3 +7,5 @@ application/x-ms-shortcut=okno-windows.desktop
 application/x-bat=okno-windows.desktop
 application/x-dosexec=okno-windows.desktop
 application/x-ms-ne-executable=okno-windows.desktop
+x-scheme-handler/http=okno-android-browser.desktop
+x-scheme-handler/https=okno-android-browser.desktop

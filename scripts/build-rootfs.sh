@@ -144,8 +144,9 @@ EOF2
   grep -q 'name="Super_L"' "$KS" ||
     sed -i '0,/<property name="default" type="empty">/s||&\n      <property name="Super_L" type="string" value="xfce4-popup-whiskermenu"/>|' "$KS"
 
-  # Links open in Chromium, which installs itself on first use (okno-app).
-  sed -i 's/^WebBrowser=.*/WebBrowser=okno-chromium/' "$FS/etc/xdg/xfce4/helpers.rc"
+  # Links open in the phone's browser (okno-open-android); Chromium, which
+  # installs itself on first use, stays in the Start menu.
+  sed -i 's/^WebBrowser=.*/WebBrowser=okno-android-browser/' "$FS/etc/xdg/xfce4/helpers.rc"
 
   # The image's package list: okno-system-update installs what an updated
   # system lacks.
