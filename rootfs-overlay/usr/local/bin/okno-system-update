@@ -1,0 +1,24 @@
+#!/bin/sh
+# Installs packages a newer Okno image brought (/usr/local/share/okno/
+# packages.txt) that this system lacks: an in-place update replaces Okno's
+# files, not packages. Started in the background by okno-desktop; quiet and
+# quick when nothing is missing, otherwise shows the install in a window.
+list=/usr/local/share/okno/packages.txt
+[ -f "$list" ] || exit 0
+missing=
+for p in $(cat "$list"); do
+  dpkg -s "$p" > /dev/null 2>&1 || missing="$missing $p"
+done
+[ -n "$missing" ] || exit 0
+
+# Let the desktop come up first, then show what happens.
+sleep 10
+exec xfce4-terminal --disable-server --title "Обновление системы" --geometry 100x24 -x sh -c "
+  echo 'Новой версии Okno нужны пакеты:$missing'
+  echo
+  if apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends$missing; then
+    echo; echo 'Готово.'; sleep 3
+  else
+    echo; echo 'Не получилось (нет интернета?). Попробую при следующем запуске рабочего стола.'
+    echo 'Нажмите Enter, чтобы закрыть.'; read _
+  fi"

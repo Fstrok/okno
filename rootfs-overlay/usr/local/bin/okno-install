@@ -21,9 +21,15 @@ declare -A PACKAGES=(
 HANGOVER_VERSION=11.16
 HANGOVER_URL="https://github.com/AndreRH/hangover/releases/download/hangover-$HANGOVER_VERSION/hangover_${HANGOVER_VERSION}_debian13_trixie_arm64.tar"
 # Libraries Wine only recommends but Windows programs commonly need: TLS for
-# the internet, X11 extensions for windows, cursors and screen size, OpenGL.
-WINDOWS_EXTRAS="libgnutls30t64 libfreetype6 libfontconfig1 libdbus-1-3 libxcursor1 libxi6 libxrandr2
-  libxrender1 libxinerama1 libxcomposite1 libxfixes3 libxxf86vm1 libgl1 libglx-mesa0 libgl1-mesa-dri"
+# the internet, X11 extensions for windows, cursors and screen size, OpenGL;
+# xz unpacks Wine Mono.
+WINDOWS_EXTRAS="xz-utils libgnutls30t64 libfreetype6 libfontconfig1 libdbus-1-3 libxcursor1 libxi6 libxrandr2
+  libxrender1 libxinerama1 libxcomposite1 libxfixes3 libxxf86vm1 libgl1 libglx-mesa0 libgl1-mesa-dri
+  libegl1 libegl-mesa0"
+# Wine Mono (.NET for Wine), the version this Wine asks for, built for ARM64:
+# .NET programs are compiled to ARM64 code and need no x86 emulation.
+MONO_VERSION=11.3.0
+MONO_URL="https://dl.winehq.org/wine/wine-mono/$MONO_VERSION/wine-mono-$MONO_VERSION-arm64.tar.xz"
 # Mesa's software OpenGL, left out of the image (see /etc/dpkg/dpkg.cfg.d/okno-slim).
 MESA_PACKAGES="libllvm19 mesa-libgallium libgl1-mesa-dri libz3-4"
 
@@ -105,10 +111,19 @@ WRAP
 fi
 
 if $windows; then
+  say "Скачиваю Wine Mono $MONO_VERSION: .NET-программы, нативно на ARM64 (около 45 МБ)"
+  # A shared install (/usr/share/wine/mono), picked up by every Wine prefix.
+  mkdir -p /usr/share/wine/mono
+  curl -fL --retry 3 -# "$MONO_URL" | tar -xJ -C /usr/share/wine/mono
+
   say "Готовлю Windows (первый запуск Wine, около минуты)"
-  # The wrapper (/usr/local/bin/wine) adds Okno's speed settings. Mono (.NET)
-  # and Gecko (HTML) are left out here; Wine offers them when a program needs them.
-  WINEDLLOVERRIDES="mscoree,mshtml=" DISPLAY= wine wineboot -i
+  # The wrapper (/usr/local/bin/wine) adds Okno's speed settings. Gecko (the
+  # HTML engine) exists only for x86; Wine offers it if a program needs it.
+  if ! WINEDLLOVERRIDES="mshtml=" DISPLAY= timeout 900 wine wineboot -i; then
+    # A stuck helper must not hang the install; the prefix is usable anyway.
+    echo "Первый запуск Wine не завершился вовремя — продолжаю."
+    wineserver -k 2> /dev/null || true
+  fi
   # 125% scale: Windows programs readable on a phone screen; smooth fonts.
   wine reg add 'HKCU\Control Panel\Desktop' /v LogPixels /t REG_DWORD /d 120 /f > /dev/null
   wine reg add 'HKCU\Control Panel\Desktop' /v FontSmoothing /t REG_SZ /d 2 /f > /dev/null

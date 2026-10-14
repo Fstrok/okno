@@ -4,10 +4,11 @@
 # desktop, TigerVNC and Okno's configuration. Runs on any Linux host:
 # arm64 natively, x86_64 through proot + qemu-user.
 # Host packages: gtk-update-icon-cache, libx11-dev (headers only), an aarch64
-# C compiler (CC_AARCH64, default aarch64-linux-gnu-gcc), qemu-user-static on
-# x86_64, and a proot that understands statx (PROOT=..., see
-# scripts/build-proot.sh): the 5.1.0 shipped by Debian/Ubuntu does not, so
-# file checks inside the image would silently look at the host.
+# C compiler (CC_AARCH64, default aarch64-linux-gnu-gcc), MinGW-w64 for x86-64
+# and i686 (Windows test programs), qemu-user-static on x86_64, and a proot
+# that understands statx (PROOT=..., see scripts/build-proot.sh): the 5.1.0
+# shipped by Debian/Ubuntu does not, so file checks inside the image would
+# silently look at the host.
 #
 #   scripts/build-rootfs.sh   →  app/src/main/assets/rootfs.tgz
 set -euo pipefail
@@ -34,7 +35,7 @@ main() {
     # remote access (started from the app, see rootfs-overlay/usr/local/bin/okno-ssh)
     openssh-server
     # base tools (zstd: Claude Code's installer downloads 3x less with it)
-    locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion zstd
+    locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion zstd xz-utils
   )
 
   base_tar="$WORK/base.tgz"
@@ -111,6 +112,11 @@ EOF2
   "$CC" -shared -fPIC -O2 -Wall -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-free-display" "$ROOT_DIR/native/free-display.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-gpu-probe" "$ROOT_DIR/native/gpu-probe.c"
+  # The same benchmark natively and as Windows programs (okno-gfx-test).
+  "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-cpubench" "$ROOT_DIR/native/cpubench.c" -lm
+  mkdir -p "$FS/usr/local/lib/okno"
+  x86_64-w64-mingw32-gcc -O2 -Wall -o "$FS/usr/local/lib/okno/cpubench64.exe" "$ROOT_DIR/native/cpubench.c"
+  i686-w64-mingw32-gcc -O2 -Wall -o "$FS/usr/local/lib/okno/cpubench32.exe" "$ROOT_DIR/native/cpubench.c"
   # Xlib's headers do not depend on the CPU: the host's (libx11-dev) are used,
   # alone, with the image's own arm64 libX11 to link against.
   xinc="$WORK/xinclude"
@@ -140,6 +146,28 @@ EOF2
 
   # Links open in Chromium, which installs itself on first use (okno-app).
   sed -i 's/^WebBrowser=.*/WebBrowser=okno-chromium/' "$FS/etc/xdg/xfce4/helpers.rc"
+
+  # The image's package list: okno-system-update installs what an updated
+  # system lacks.
+  mkdir -p "$FS/usr/local/share/okno"
+  printf '%s\n' "${PACKAGES[@]}" > "$FS/usr/local/share/okno/packages.txt"
+
+  # Okno's own files, for updating an installed system in place without
+  # touching what the user installed (RootfsInstaller.update): the overlay
+  # except the home folder, the native helpers, and the packaged files
+  # edited above. Not okno-slim: installing Windows support edits it.
+  {
+    (cd "$ROOT_DIR/rootfs-overlay" && find . \( -type f -o -type l \) ! -path './root/*')
+    printf '%s\n' ./usr/local/lib/libokno-nodumpable.so ./usr/local/bin/okno-free-display \
+      ./usr/local/bin/okno-gpu-probe ./usr/local/bin/okno-wm-guard ./usr/local/share/okno/packages.txt \
+      ./usr/local/bin/okno-cpubench ./usr/local/lib/okno/cpubench64.exe ./usr/local/lib/okno/cpubench32.exe \
+      ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml \
+      ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml \
+      ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml \
+      ./etc/xdg/xfce4/helpers.rc
+  } | sort -u > "$WORK/update.list"
+  mkdir -p "$ASSETS"
+  tar --numeric-owner -C "$FS" -czf "$ASSETS/okno-update.tgz" -T "$WORK/update.list"
 
   guest apt-get clean
   # Mount points proot -q leaves behind (host rootfs for qemu, /dev/null bind).

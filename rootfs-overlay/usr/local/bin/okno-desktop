@@ -64,5 +64,7 @@ setxkbmap -layout okno
 
 # Keeps windows inside the screen and opens big ones maximized (phone screen).
 okno-wm-guard &
+# After an in-place system update: installs packages the new version needs.
+okno-system-update &
 
 dbus-launch --exit-with-session startxfce4

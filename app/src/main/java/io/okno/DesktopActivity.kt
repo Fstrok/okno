@@ -396,8 +396,9 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     /**
-     * A newer APK may carry a newer system image (new tools, fixes). Replacing
-     * it wipes what the user installed, so ask once per version, never force.
+     * A newer APK may carry a newer system image (new tools, fixes). The
+     * update keeps what the user installed; a clean reinstall is offered too.
+     * Asked once per version, never forced.
      */
     private fun offerSystemUpdate() {
         val svc = service ?: return
@@ -405,16 +406,46 @@ class DesktopActivity : Activity(), ServiceConnection {
         if (bundled == "unknown" || svc.env.installedVersion == bundled) return
         if (prefs.getString(PREF_DECLINED_UPDATE, null) == bundled) return
         AlertDialog.Builder(this)
-            .setTitle("Новая версия системы")
+            .setTitle("Обновление системы")
             .setMessage(
                 "В этой версии Okno обновлён Linux: новые возможности и исправления.\n\n" +
-                    "Обновление переустановит систему: программы, установленные вами, и файлы в " +
-                    "домашней папке (/root) будут удалены. Файлы телефона (/sdcard) не затрагиваются."
+                    "Установленные программы и ваши файлы сохранятся, рабочий стол перезапустится. " +
+                    "Если новой версии нужны пакеты, они докачаются при запуске."
             )
-            .setPositiveButton("Обновить") { _, _ -> reinstallSystem() }
+            .setPositiveButton("Обновить") { _, _ -> updateSystem() }
             .setNegativeButton("Не сейчас") { _, _ ->
                 prefs.edit().putString(PREF_DECLINED_UPDATE, bundled).apply()
             }
+            .setNeutralButton("Переустановить начисто") { _, _ -> confirmReinstall() }
+            .show()
+    }
+
+    private fun updateSystem() {
+        val svc = service ?: return
+        disconnect()
+        svc.stopDesktop()
+        showOverlay("Обновление системы", "Обновляю файлы Okno…", progress = -1)
+        svc.updateSystem { error ->
+            if (error == null) {
+                startDesktop()
+            } else {
+                Log.e(TAG, "update failed", error)
+                showOverlay("Не удалось обновить", error.message ?: error.toString(), button = "Переустановить начисто") {
+                    confirmReinstall()
+                }
+            }
+        }
+    }
+
+    private fun confirmReinstall() {
+        AlertDialog.Builder(this)
+            .setTitle("Переустановить начисто?")
+            .setMessage(
+                "Система будет установлена заново: программы, установленные вами, и файлы в домашней " +
+                    "папке (/root) удалятся. Файлы телефона (/sdcard) не затрагиваются."
+            )
+            .setPositiveButton("Переустановить") { _, _ -> reinstallSystem() }
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 

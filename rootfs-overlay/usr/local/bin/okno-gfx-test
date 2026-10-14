@@ -1,8 +1,9 @@
 #!/bin/bash
 # Short test of what this phone gives Linux, to tune Okno's graphics:
 # processor, memory, the cost of starting programs under proot, whether the
-# Adreno GPU is reachable from Linux (okno-gpu-probe) and how fast the
-# desktop draws (x11perf, installed on first run). Takes about half a minute;
+# Adreno GPU is reachable from Linux (okno-gpu-probe), how fast the desktop
+# draws (x11perf, installed on first run) and how much speed the x86
+# emulation for Windows programs keeps (okno-cpubench). About half a minute;
 # the report is also saved to a file to send.
 #   okno-gfx-test
 REPORT=/root/okno-test.txt
@@ -23,6 +24,11 @@ find_display() {
       return
     fi
   done
+}
+
+# ", N% of native speed" for an emulated run, empty if either time is missing.
+share() {
+  awk -v n="$1" -v e="$2" 'BEGIN { if (n > 0 && e > 0) printf ", %.0f%% скорости родного кода", n * 100 / e }'
 }
 
 # Operations per second of one x11perf test, empty if it did not run.
@@ -92,6 +98,20 @@ main() {
     else
       echo "x11perf не установился (нет интернета?): тест отрисовки пропущен"
     fi
+  fi
+
+  section "Windows-программы (эмуляция x86)"
+  # The same work as a native ARM64 program and as Windows x86-64 / x86 ones.
+  local native x64 x86
+  native=$(okno-cpubench 2>/dev/null)
+  echo "Родной код ARM64: ${native:-?} мс"
+  if [ -x /usr/bin/wine ]; then
+    x64=$(wine /usr/local/lib/okno/cpubench64.exe 2>/dev/null | tr -dc 0-9)
+    x86=$(wine /usr/local/lib/okno/cpubench32.exe 2>/dev/null | tr -dc 0-9)
+    echo "Windows x86-64 через FEX: ${x64:-не запустилось} мс$(share "$native" "$x64")"
+    echo "Windows x86 (32 бит) через Box64: ${x86:-не запустилось} мс$(share "$native" "$x86")"
+  else
+    echo "Windows-программы не установлены (☰ → Программы → Windows-программы)"
   fi
 
   section "Итог"

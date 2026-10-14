@@ -120,6 +120,17 @@ class LinuxService : Service() {
         }
     }
 
+    /**
+     * Updates the installed system in place (see [RootfsInstaller.update]);
+     * the desktop must be stopped. [onDone] arrives on the main thread.
+     */
+    fun updateSystem(onDone: (Throwable?) -> Unit) {
+        worker.execute {
+            val error = runCatching { RootfsInstaller(this, env).update() }.exceptionOrNull()
+            main.post { onDone(error) }
+        }
+    }
+
     /** Unix socket of the desktop's VNC server, as seen from Android. */
     val desktopSocket: File get() = File(env.rootfs, "tmp/.okno/vnc.sock")
 

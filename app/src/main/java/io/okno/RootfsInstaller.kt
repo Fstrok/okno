@@ -88,6 +88,42 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
     }
 
     /**
+     * Updates an installed system in place: Okno's own files from this APK's
+     * image (scripts, settings, helpers; assets/okno-update.tgz) replace the
+     * old ones, while programs and files the user added stay. Packages the
+     * new image has and this system lacks are installed by okno-system-update
+     * when the desktop starts. Blocking; call off the main thread.
+     */
+    fun update() {
+        TarArchiveInputStream(GZIPInputStream(BufferedInputStream(context.assets.open(UPDATE_ASSET), 1 shl 16))).use { tar ->
+            while (true) {
+                val entry = tar.nextEntry ?: break
+                val name = entry.name.removePrefix("./").trimEnd('/')
+                if (name.isEmpty() || name.split('/').contains("..")) continue
+                val target = File(env.rootfs, name)
+                if (entry.isDirectory) {
+                    target.mkdirs()
+                    continue
+                }
+                if (!entry.isFile && !entry.isSymbolicLink) continue
+                target.parentFile?.mkdirs()
+                // Written aside, then renamed over the old file: a program that is
+                // running keeps reading its old copy (shell scripts read as they run).
+                val temp = File(target.parentFile, ".${target.name}.okno-new")
+                temp.delete()
+                if (entry.isSymbolicLink) {
+                    Os.symlink(entry.linkName, temp.path)
+                } else {
+                    FileOutputStream(temp).use { tar.copyTo(it, 1 shl 16) }
+                    chmod(temp, entry.mode or 0b110_000_000)
+                }
+                Os.rename(temp.path, target.path)
+            }
+        }
+        File(env.rootfs, LinuxEnvironment.INSTALLED_MARKER).writeText(rootfsVersion())
+    }
+
+    /**
      * Device-specific setup. Everything static (hosts, apt settings, desktop
      * configuration) is baked into the image by scripts/build-rootfs.sh.
      */
@@ -139,6 +175,7 @@ class RootfsInstaller(private val context: Context, private val env: LinuxEnviro
 
     companion object {
         private const val ASSET = "rootfs.tgz"
+        private const val UPDATE_ASSET = "okno-update.tgz"
 
         /** Version of the system image inside this APK (scripts/build-rootfs.sh). */
         fun bundledVersion(context: Context): String =
