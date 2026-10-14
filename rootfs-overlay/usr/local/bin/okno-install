@@ -19,16 +19,20 @@ say() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 
 packages=()
 vscode=false
+claude=false
 for name in "$@"; do
   case "$name" in
     vscode) vscode=true ;;
+    claude) claude=true ;;
     *) [ -n "${PACKAGES[$name]:-}" ] || { echo "неизвестная программа: $name" >&2; exit 2; }
        packages+=(${PACKAGES[$name]}) ;;
   esac
 done
 
-say "Обновляю список пакетов"
-apt-get update
+if [ ${#packages[@]} -gt 0 ] || $vscode; then
+  say "Обновляю список пакетов"
+  apt-get update
+fi
 
 if $vscode; then
   say "Скачиваю VS Code (arm64) с сайта Microsoft"
@@ -42,16 +46,27 @@ if [ ${#packages[@]} -gt 0 ]; then
 fi
 rm -f /tmp/vscode.deb
 
-# Chromium and Electron apps (VS Code) need their sandbox off under proot,
-# and refuse to run as root without it.
-if [ -d /etc/chromium.d ]; then
-  echo 'export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-gpu-sandbox"' > /etc/chromium.d/okno
+# Okno's own Start menu entry for Chromium (it installs on first use) stays;
+# hide the package's duplicate. Chromium's flags live in /etc/chromium.d/okno.
+if [ -f /usr/share/applications/chromium.desktop ]; then
+  mkdir -p /usr/local/share/applications
+  sed '0,/^\[Desktop Entry\]$/s//[Desktop Entry]\nNoDisplay=true/' \
+    /usr/share/applications/chromium.desktop > /usr/local/share/applications/chromium.desktop
 fi
+
+if $claude; then
+  say "Устанавливаю Claude Code"
+  claude --version
+fi
+
+# Electron apps (VS Code) need their sandbox off under proot, and refuse to
+# run as root without it.
 if [ -x /usr/share/code/code ]; then
   cat > /usr/local/bin/code <<'WRAP'
 #!/bin/sh
-# VS Code as root under proot: no sandbox, and an explicit data dir.
-exec /usr/share/code/code --no-sandbox --disable-gpu-sandbox --user-data-dir=/root/.config/Code "$@"
+# VS Code as root under proot: no sandbox, no GPU behind the desktop yet,
+# and an explicit data dir.
+exec /usr/share/code/code --no-sandbox --disable-gpu --user-data-dir=/root/.config/Code "$@"
 WRAP
   chmod 755 /usr/local/bin/code
   for f in /usr/share/applications/code*.desktop; do

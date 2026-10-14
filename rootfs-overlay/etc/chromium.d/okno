@@ -1,0 +1,6 @@
+# Okno: Chromium under proot, as root.
+# --no-sandbox: the sandbox cannot work under proot, and as root Chromium
+#   refuses to start without this flag.
+# --disable-gpu: there is no GPU behind the desktop yet, and the software
+#   compositor is cheaper than Chromium emulating one.
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-gpu"

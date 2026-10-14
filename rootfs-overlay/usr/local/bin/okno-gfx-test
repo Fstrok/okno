@@ -1,0 +1,115 @@
+#!/bin/bash
+# Short test of what this phone gives Linux, to tune Okno's graphics:
+# processor, memory, the cost of starting programs under proot, whether the
+# Adreno GPU is reachable from Linux (okno-gpu-probe) and how fast the
+# desktop draws (x11perf, installed on first run). Takes about half a minute;
+# the report is also saved to a file to send.
+#   okno-gfx-test
+REPORT=/root/okno-test.txt
+export LANG=${LANG:-C.UTF-8} DEBIAN_FRONTEND=noninteractive
+
+now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
+section() { printf '\n== %s ==\n' "$1"; }
+
+# Display of the running Okno desktop (also when started from the Android terminal).
+find_display() {
+  local lock pid
+  for lock in /tmp/.X*-lock; do
+    [ -f "$lock" ] || continue
+    pid=$(tr -dc 0-9 < "$lock")
+    if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
+      lock=${lock#/tmp/.X}
+      echo ":${lock%-lock}"
+      return
+    fi
+  done
+}
+
+# Operations per second of one x11perf test, empty if it did not run.
+x11rate() {
+  x11perf -repeat 1 -time 2 "$1" 2>/dev/null | sed -n 's/.*( *\([0-9.]*\)\/sec).*/\1/p' | tail -n 1
+}
+
+main() {
+  echo "Тест Okno, $(date '+%d.%m.%Y %H:%M')"
+
+  section "Процессор и память"
+  echo "Ядро Linux: $(uname -r), страница памяти $(getconf PAGESIZE) байт"
+  local cores=0 p
+  for p in /sys/devices/system/cpu/cpufreq/policy*; do
+    [ -r "$p/cpuinfo_max_freq" ] || continue
+    echo "Ядра $(cat "$p/related_cpus"): до $(( $(cat "$p/cpuinfo_max_freq") / 1000 )) МГц"
+    cores=1
+  done
+  [ $cores = 1 ] || echo "Ядер: $(nproc) (частоты Android не показывает)"
+  awk '/^MemTotal/ {t = $2} /^MemAvailable/ {a = $2}
+       END {printf "Память: %.1f ГБ, свободно %.1f ГБ\n", t / 1048576, a / 1048576}' /proc/meminfo
+  df -h / | awk 'NR == 2 {print "Место для Linux: свободно " $4}'
+
+  local t0 t1
+  t0=$(now_ms)
+  head -c 134217728 /dev/zero | sha256sum > /dev/null
+  t1=$(now_ms)
+  echo "Скорость одного ядра: sha256 $(( 128 * 1000 / (t1 - t0 + 1) )) МБ/с"
+  t0=$(now_ms)
+  for ((p = 0; p < 100; p++)); do /bin/true; done
+  t1=$(now_ms)
+  awk -v ms=$((t1 - t0)) 'BEGIN {printf "Запуск программы (накладные proot): %.1f мс\n", ms / 100}'
+
+  section "Видеочип"
+  local gpu=0
+  okno-gpu-probe && gpu=1
+  if [ -d /dev/dri ]; then echo "DRM (/dev/dri): $(ls /dev/dri | tr '\n' ' ')"; else echo "DRM (/dev/dri): нет"; fi
+  if ( exec 3< /dev/dma_heap/system ) 2>/dev/null; then echo "dma_heap: доступен"; else echo "dma_heap: нет"; fi
+
+  section "Отрисовка рабочего стола"
+  local disp=${DISPLAY:-$(find_display)} shm="" put="" copy="" w=0 h=0
+  if [ -z "$disp" ]; then
+    echo "Рабочий стол не запущен: тест отрисовки пропущен"
+  else
+    export DISPLAY=$disp
+    read -r w h < <(xrandr --current 2>/dev/null | sed -n 's/.*current \([0-9]*\) x \([0-9]*\).*/\1 \2/p')
+    echo "Экран $disp: ${w}x${h}"
+    if ! command -v x11perf > /dev/null; then
+      echo "Ставлю x11perf (пакет x11-apps, около 5 МБ)…"
+      { apt-get update -qq && apt-get install -y -qq --no-install-recommends x11-apps; } > /dev/null 2>&1
+    fi
+    if command -v x11perf > /dev/null; then
+      echo "Окно теста на рабочем столе мигнёт несколько секунд…"
+      put=$(x11rate -putimage500)
+      shm=$(x11rate -shmput500)
+      copy=$(x11rate -copywinwin500)
+      # 500x500 pixels per operation; "screens" are full-screen frames per second.
+      awk -v put="$put" -v shm="$shm" -v copy="$copy" -v px=$((w * h)) 'function line(name, r) {
+            if (r == "") { printf "%s: не работает\n", name; return }
+            printf "%s: %.0f Мпикс/с, %.0f кадров/с на весь экран\n", name, r * 0.25, px ? r * 250000 / px : 0
+          }
+          BEGIN {
+            line("Картинка через сокет (PutImage)", put)
+            line("Картинка через общую память (MIT-SHM)", shm)
+            line("Прокрутка и перемещение окон (Copy)", copy)
+          }'
+    else
+      echo "x11perf не установился (нет интернета?): тест отрисовки пропущен"
+    fi
+  fi
+
+  section "Итог"
+  if [ $gpu = 1 ]; then
+    echo "Видеочип доступен из Linux: можно подключить Turnip (Vulkan) и Zink (OpenGL)"
+    echo "  для 3D на видеочипе вместо процессора."
+  else
+    echo "Видеочип из Linux недоступен: 3D только на процессоре (llvmpipe)."
+  fi
+  if [ -n "$disp" ] && [ -n "$put" ] && [ -z "$shm" ]; then
+    echo "Общая память X (MIT-SHM) не работает: программы рисуют медленнее, чем могли бы."
+  fi
+  echo
+  echo "Отчёт сохранён: $REPORT"
+}
+
+main 2>&1 | tee "$REPORT"
+# Also next to the phone's downloads, where it is easy to send from.
+if [ -d /sdcard/Download ] && cp "$REPORT" /sdcard/Download/okno-test.txt 2>/dev/null; then
+  echo "Копия: Загрузки/okno-test.txt"
+fi

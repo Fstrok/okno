@@ -1,0 +1,15 @@
+#!/bin/sh
+# Claude Code, ready to type: the first run downloads it with the official
+# installer (into ~/.local, where it keeps itself up to date), later runs
+# start it right away. It needs the internet anyway, so it is not bundled.
+real="$HOME/.local/bin/claude"
+if [ ! -x "$real" ]; then
+  echo "Первый запуск: устанавливаю Claude Code (около 90 МБ)…"
+  # The status of "curl | bash" is bash's, so check the result instead.
+  curl -fsSL https://claude.ai/install.sh | bash
+  if [ ! -x "$real" ]; then
+    echo "Не удалось установить Claude Code. Проверьте интернет и запустите снова." >&2
+    exit 1
+  fi
+fi
+exec "$real" "$@"

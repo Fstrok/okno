@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Code
+Comment=ИИ-помощник для программирования в терминале
+Exec=xfce4-terminal --title "Claude Code" -x bash -c "claude; exec bash"
+Icon=utilities-terminal
+Categories=Development;
+Terminal=false

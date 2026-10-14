@@ -33,8 +33,8 @@ main() {
     fonts-dejavu-core fonts-noto-color-emoji
     # remote access (started from the app, see rootfs-overlay/usr/local/bin/okno-ssh)
     openssh-server
-    # base tools
-    locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion
+    # base tools (zstd: Claude Code's installer downloads 3x less with it)
+    locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion zstd
   )
 
   base_tar="$WORK/base.tgz"
@@ -91,6 +91,10 @@ EOF2
     if [ -f "$theme/index.theme" ]; then gtk-update-icon-cache --force --quiet "$theme"; fi
   done
 
+  # The slim image has no manual pages, and man-db's index job fails under
+  # proot (it switches users); keep it quiet for programs installed later.
+  echo 'man-db man-db/auto-update boolean false' | guest debconf-set-selections
+
   echo "ru_RU.UTF-8 UTF-8" > "$FS/etc/locale.gen"
   echo "en_US.UTF-8 UTF-8" >> "$FS/etc/locale.gen"
   guest locale-gen
@@ -101,10 +105,12 @@ EOF2
   chmod 755 "$FS/usr/local/bin/"*
 
   # Small native helpers (native/): an LD_PRELOAD shim that lets sftp-server
-  # run under proot, and the probe okno-desktop uses to pick a free display.
+  # run under proot, the probe okno-desktop uses to pick a free display, and
+  # the GPU check of okno-gfx-test.
   CC="${CC_AARCH64:-aarch64-linux-gnu-gcc}"
   "$CC" -shared -fPIC -O2 -Wall -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-free-display" "$ROOT_DIR/native/free-display.c"
+  "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-gpu-probe" "$ROOT_DIR/native/gpu-probe.c"
 
   # Every phone must get its own SSH host keys (okno-ssh creates them).
   rm -f "$FS"/etc/ssh/ssh_host_*
@@ -124,6 +130,9 @@ EOF2
   KS="$FS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml"
   grep -q 'name="Super_L"' "$KS" ||
     sed -i '0,/<property name="default" type="empty">/s||&\n      <property name="Super_L" type="string" value="xfce4-popup-whiskermenu"/>|' "$KS"
+
+  # Links open in Chromium, which installs itself on first use (okno-app).
+  sed -i 's/^WebBrowser=.*/WebBrowser=okno-chromium/' "$FS/etc/xdg/xfce4/helpers.rc"
 
   guest apt-get clean
   # Mount points proot -q leaves behind (host rootfs for qemu, /dev/null bind).

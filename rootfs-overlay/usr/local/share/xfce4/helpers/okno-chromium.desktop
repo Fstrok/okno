@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Icon=web-browser
+Type=X-XFCE-Helper
+Name=Chromium (Okno)
+StartupNotify=true
+X-XFCE-Binaries=okno-app;
+X-XFCE-Category=WebBrowser
+X-XFCE-Commands=okno-app chromium;
+X-XFCE-CommandsWithParameter=okno-app chromium "%s";

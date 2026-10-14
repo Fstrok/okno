@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Тест графики
+Comment=Скорость процессора, отрисовки и доступ к видеочипу
+Exec=xfce4-terminal --disable-server --hold --title "Тест графики" --geometry 90x40 -x okno-gfx-test
+Icon=utilities-system-monitor
+Categories=System;
+Terminal=false

@@ -26,6 +26,8 @@
       <property name="show-button-title" type="bool" value="false"/>
       <!-- Only what is installed; no screen lock or user switching under proot. -->
       <property name="favorites" type="array">
+        <value type="string" value="okno-chromium.desktop"/>
+        <value type="string" value="okno-claude.desktop"/>
         <value type="string" value="xfce4-terminal-emulator.desktop"/>
         <value type="string" value="xfce4-file-manager.desktop"/>
         <value type="string" value="org.xfce.mousepad.desktop"/>

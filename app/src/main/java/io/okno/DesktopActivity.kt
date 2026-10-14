@@ -338,6 +338,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         val menu = PopupMenu(this, anchor)
         menu.menu.add(0, MENU_PROGRAMS, 0, "Программы…")
         menu.menu.add(0, MENU_TERMINAL, 0, "Терминал")
+        menu.menu.add(0, MENU_GFX_TEST, 0, "Тест графики")
         menu.menu.add(0, MENU_RESTART, 1, "Перезапустить рабочий стол")
         menu.menu.add(0, MENU_UI_SIZE, 2, "Размер интерфейса…")
         if (!hasStorage()) menu.menu.add(0, MENU_STORAGE, 2, "Доступ к файлам телефона")
@@ -365,6 +366,7 @@ class DesktopActivity : Activity(), ServiceConnection {
                     .setNegativeButton(android.R.string.cancel, null)
                     .show()
                 MENU_TERMINAL -> startActivity(Intent(this, TerminalActivity::class.java))
+                MENU_GFX_TEST -> runInTerminal("okno-gfx-test")
                 MENU_RESTART -> restartDesktop()
                 MENU_NETWORK -> AlertDialog.Builder(this)
                     .setTitle("Сеть")
@@ -448,16 +450,19 @@ class DesktopActivity : Activity(), ServiceConnection {
             }
             .setPositiveButton("Установить") { _, _ ->
                 val names = PROGRAMS.filterIndexed { i, _ -> picked[i] }.map { it.first }
-                if (names.isEmpty()) return@setPositiveButton
-                val script = "okno-install ${names.joinToString(" ")}; " +
-                    "echo; read -r -p 'Нажмите Enter, чтобы вернуться на рабочий стол' _"
-                startActivity(
-                    Intent(this, TerminalActivity::class.java)
-                        .putExtra(TerminalActivity.EXTRA_COMMAND, arrayOf("/bin/bash", "-lc", script))
-                )
+                if (names.isNotEmpty()) runInTerminal("okno-install ${names.joinToString(" ")}")
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /** Runs [command] in a visible terminal that stays open until Enter, so its output can be read. */
+    private fun runInTerminal(command: String) {
+        val script = "$command; echo; read -r -p 'Нажмите Enter, чтобы вернуться на рабочий стол' _"
+        startActivity(
+            Intent(this, TerminalActivity::class.java)
+                .putExtra(TerminalActivity.EXTRA_COMMAND, arrayOf("/bin/bash", "-lc", script))
+        )
     }
 
     private fun showSshDialog() {
@@ -560,6 +565,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         private const val MENU_PROGRAMS = 8
         private const val MENU_UI_SIZE = 9
         private const val MENU_STORAGE = 10
+        private const val MENU_GFX_TEST = 11
         private const val REQUEST_STORAGE_FIRST = 1
         private const val REQUEST_STORAGE_LATER = 2
         private const val PREF_SHORT_SIDE = "desktop_short_side"
@@ -570,6 +576,7 @@ class DesktopActivity : Activity(), ServiceConnection {
 
         /** okno-install names (rootfs-overlay/usr/local/bin/okno-install) and labels. */
         private val PROGRAMS = listOf(
+            "claude" to "Claude Code — ИИ-помощник в терминале",
             "vscode" to "VS Code — редактор кода",
             "firefox" to "Firefox — браузер",
             "chromium" to "Chromium — браузер",
