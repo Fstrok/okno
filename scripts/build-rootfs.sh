@@ -148,7 +148,10 @@ EOF2
   "$ROOT_DIR/scripts/xfconf-set.py" "$XF/xsettings.xml" \
     /Net/ThemeName string Okno /Net/IconThemeName string elementary-xfce-dark \
     /Gtk/FontName string "Inter Variable 10" /Gtk/MonospaceFontName string "DejaVu Sans Mono 10"
-  # Window frames of the Okno theme (its GTK part is in rootfs-overlay).
+  # The Okno theme: its CSS is in rootfs-overlay, Arc-Dark's compiled styles
+  # are linked in (git cannot hold links into the image), frames are generated.
+  ln -sfn ../Arc-Dark/gtk-2.0 "$FS/usr/share/themes/Okno/gtk-2.0"
+  ln -sfn ../../Arc-Dark/gtk-3.0/gtk.gresource "$FS/usr/share/themes/Okno/gtk-3.0/gtk.gresource"
   "$ROOT_DIR/scripts/xfwm4-theme.py" "$FS/usr/share/themes/Okno/xfwm4"
 
   # The WIN key opens the Start menu, as on Windows (added to XFCE's own defaults).
@@ -178,7 +181,7 @@ EOF2
       ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml \
       ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml \
       ./etc/xdg/xfce4/helpers.rc
-    (cd "$FS" && find ./usr/share/themes/Okno/xfwm4 -type f)
+    (cd "$FS" && find ./usr/share/themes/Okno \( -type f -o -type l \))
   } | sort -u > "$WORK/update.list"
   mkdir -p "$ASSETS"
   tar --numeric-owner -C "$FS" -czf "$ASSETS/okno-update.tgz" -T "$WORK/update.list"
