@@ -1,32 +1,17 @@
 #!/bin/sh
 # Claude Code's browser: Playwright MCP driving Chromium in a window on the
-# Okno desktop, so the user sees what Claude does and can step in (log in,
-# solve a captcha). Its own profile, which keeps Claude's logins between
-# sessions and leaves the user's Chromium alone. Without the desktop it runs
-# headless. Registered with Claude Code by the claude wrapper; installed by
-# okno-install claude-browser. Speaks MCP on stdin/stdout: messages to stderr.
+# desktop (headless without it), with its own persistent profile. Installed
+# by okno-install claude-browser, registered by the claude wrapper.
 if ! command -v playwright-mcp > /dev/null || [ ! -x /usr/bin/chromium ]; then
   echo "okno-browser-mcp: не установлен, запустите: okno-install claude-browser" >&2
   exit 1
 fi
 
-# The desktop's display (see okno-screen): DISPLAY is unset under SSH.
-if [ -z "$DISPLAY" ]; then
-  for lock in /tmp/.X*-lock; do
-    [ -f "$lock" ] || continue
-    pid=$(tr -dc 0-9 < "$lock")
-    if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
-      lock=${lock#/tmp/.X}
-      export DISPLAY=":${lock%-lock}"
-      break
-    fi
-  done
-fi
+export DISPLAY=${DISPLAY:-$(okno-display)}
 headless=
 [ -n "$DISPLAY" ] || headless=--headless
 
-# /usr/bin/chromium adds Okno's flags (/etc/chromium.d/okno). A phone is
-# slower than the PCs the default timeouts are made for.
+# Longer timeouts: a phone is slower than a PC.
 exec playwright-mcp --browser chromium --executable-path /usr/bin/chromium --no-sandbox $headless \
   --user-data-dir /root/.config/okno-claude-browser --output-dir /tmp/okno-browser --file-paths absolute \
   --timeout-action 15000 --timeout-navigation 120000 "$@"

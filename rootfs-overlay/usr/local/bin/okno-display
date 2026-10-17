@@ -1,0 +1,13 @@
+#!/bin/sh
+# Prints the Okno desktop's display (:1, ...): okno-desktop takes the first
+# free number. For SSH sessions and scripts, where DISPLAY is unset.
+for lock in /tmp/.X*-lock; do
+  [ -f "$lock" ] || continue
+  pid=$(tr -dc 0-9 < "$lock")
+  if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
+    lock=${lock#/tmp/.X}
+    echo ":${lock%-lock}"
+    exit 0
+  fi
+done
+exit 1

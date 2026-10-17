@@ -1,12 +1,6 @@
 #!/bin/bash
-# Eyes and hands on the Okno desktop, for Claude Code (and scripts): takes
-# screenshots and clicks, types and presses keys like the user would. Works
-# with any program on the desktop, Windows programs included.
-#
-# Screenshots are scaled down to at most 1280 px on the long side (a phone
-# screen is too big to send whole); the coordinates the other commands take
-# are those of the latest screenshot and are scaled back to the screen.
-#
+# Eyes and hands on the Okno desktop for Claude Code. Screenshots are scaled
+# to at most 1280 px on the long side; coordinates are those of the latest one.
 #   okno-screen shot [FILE]        screenshot → PNG (default /tmp/okno-screen.png)
 #   okno-screen click X Y          left click     (also: dclick, rclick, mclick)
 #   okno-screen move X Y           move the pointer
@@ -24,26 +18,12 @@ STATE=/tmp/.okno/screen-scale
 
 die() { echo "okno-screen: $*" >&2; exit 1; }
 
-# The desktop's display: okno-desktop picks the first free number, so look
-# for our Xvnc when DISPLAY is unset (SSH sessions, scripts).
-if [ -z "${DISPLAY:-}" ]; then
-  for lock in /tmp/.X*-lock; do
-    [ -f "$lock" ] || continue
-    pid=$(tr -dc 0-9 < "$lock")
-    if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
-      lock=${lock#/tmp/.X}
-      export DISPLAY=":${lock%-lock}"
-      break
-    fi
-  done
-fi
-[ -n "${DISPLAY:-}" ] || die "рабочий стол не запущен (откройте приложение Okno)"
+export DISPLAY=${DISPLAY:-$(okno-display)}
+[ -n "$DISPLAY" ] || die "рабочий стол не запущен (откройте приложение Okno)"
 command -v xdotool > /dev/null && command -v scrot > /dev/null ||
   die "нет xdotool/scrot: apt install xdotool scrot wmctrl"
 
-# Percent of the screen size the screenshots have (100 = full size).
 scale() { cat "$STATE" 2>/dev/null || echo 100; }
-# Screenshot coordinates → screen coordinates.
 real() { echo $(( ($1 * 100 + $(scale) / 2) / $(scale) )); }
 num() { [[ ${1:-} =~ ^[0-9]+$ ]] || die "ожидалось число, а не '${1:-}'"; }
 at() { num "${1:-}"; num "${2:-}"; xdotool mousemove --sync "$(real "$1")" "$(real "$2")"; }
