@@ -12,20 +12,6 @@ export LANG=${LANG:-C.UTF-8} DEBIAN_FRONTEND=noninteractive
 now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
 section() { printf '\n== %s ==\n' "$1"; }
 
-# Display of the running Okno desktop (also when started from the Android terminal).
-find_display() {
-  local lock pid
-  for lock in /tmp/.X*-lock; do
-    [ -f "$lock" ] || continue
-    pid=$(tr -dc 0-9 < "$lock")
-    if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
-      lock=${lock#/tmp/.X}
-      echo ":${lock%-lock}"
-      return
-    fi
-  done
-}
-
 # ", N% of native speed" for an emulated run, empty if either time is missing.
 share() {
   awk -v n="$1" -v e="$2" 'BEGIN { if (n > 0 && e > 0) printf ", %.0f%% скорости родного кода", n * 100 / e }'
@@ -69,7 +55,7 @@ main() {
   if ( exec 3< /dev/dma_heap/system ) 2>/dev/null; then echo "dma_heap: доступен"; else echo "dma_heap: нет"; fi
 
   section "Отрисовка рабочего стола"
-  local disp=${DISPLAY:-$(find_display)} shm="" put="" copy="" w=0 h=0
+  local disp=${DISPLAY:-$(okno-display)} shm="" put="" copy="" w=0 h=0
   if [ -z "$disp" ]; then
     echo "Рабочий стол не запущен: тест отрисовки пропущен"
   else
