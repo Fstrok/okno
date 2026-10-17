@@ -1,0 +1,2 @@
+The desktop of this system runs on the X server inside the Okno app (Termux:X11).
+Apps older than that cannot start it; the app updates older systems before starting the desktop.

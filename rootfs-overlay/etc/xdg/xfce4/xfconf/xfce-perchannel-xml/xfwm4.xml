@@ -6,7 +6,7 @@
     <property name="title_font" type="string" value="Inter Variable Semi-Bold 10"/>
     <property name="button_layout" type="string" value="O|HMC"/>
     <property name="title_alignment" type="string" value="left"/>
-    <!-- No GPU behind Xvnc: compositing only costs CPU. -->
+    <!-- Software compositing only costs CPU on a phone. -->
     <property name="use_compositing" type="bool" value="false"/>
     <property name="workspace_count" type="int" value="1"/>
   </property>

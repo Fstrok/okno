@@ -1,11 +1,12 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "io.okno"
     compileSdk = 36
+    // The one Termux:X11 builds its X server with (third_party/termux-x11/lorie/version.gradle).
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "io.okno"
@@ -60,11 +61,10 @@ android {
     }
 }
 
-kotlin {
-    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-}
-
 dependencies {
     implementation("com.github.termux.termux-app:terminal-view:v0.118.1")
     implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation(project(":lorie"))
+    // Termux:X11's activity, which DesktopActivity extends, is an AppCompatActivity (at its version).
+    implementation("androidx.appcompat:appcompat:1.1.0")
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Debian system that ships inside the APK: the official
 # debian:trixie-slim arm64 image (scripts/fetch-rootfs.sh) plus the XFCE
-# desktop, TigerVNC and Okno's configuration. Runs on any Linux host:
+# desktop and Okno's configuration (the X server itself is in the app: Termux:X11). Runs on any Linux host:
 # arm64 natively, x86_64 through proot + qemu-user.
 # Host packages: gtk-update-icon-cache, libx11-dev (headers only), an aarch64
 # C compiler (CC_AARCH64, default aarch64-linux-gnu-gcc), MinGW-w64 for x86-64
@@ -27,8 +27,8 @@ main() {
     # desktop
     xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-settings xfconf
     xfce4-whiskermenu-plugin xfce4-terminal thunar mousepad
-    # display server reached by the app
-    tigervnc-standalone-server dbus-x11
+    # X tools: keyboard layouts (the app's X server reads them from here), setxkbmap, xrandr
+    xkb-data x11-xkb-utils x11-xserver-utils dbus-x11
     # look and feel
     arc-theme elementary-xfce-icon-theme librsvg2-common
     fonts-inter-variable fonts-dejavu-core fonts-noto-color-emoji
@@ -62,8 +62,8 @@ main() {
   # The slim image drops all translations; keep Russian for the desktop.
   echo "path-include /usr/share/locale/ru/*" > "$FS/etc/dpkg/dpkg.cfg.d/okno-locale"
   echo 'APT::Sandbox::User "root";' > "$FS/etc/apt/apt.conf.d/01okno"
-  # No GPU behind Xvnc: leave out Mesa's software 3D stack (~180 MB; Xvnc only
-  # dlopens it for OpenGL clients) and the HiDPI icon set the desktop never uses.
+  # Leave out Mesa's software 3D stack (~180 MB; installed for Windows programs
+  # and OpenGL when needed) and the HiDPI icon set the desktop never uses.
   cat > "$FS/etc/dpkg/dpkg.cfg.d/okno-slim" <<'EOF2'
 # Okno leaves out Mesa's software 3D (no GPU behind the desktop), HiDPI icons
 # and the Arc variants it does not use (its theme builds on Arc-Dark).
@@ -116,11 +116,10 @@ EOF2
   chmod 755 "$FS/usr/local/bin/"*
 
   # Small native helpers (native/): an LD_PRELOAD shim that lets sftp-server
-  # run under proot, the probe okno-desktop uses to pick a free display, the
-  # GPU check of okno-gfx-test, and the window guard of the desktop.
+  # run under proot, the GPU check of okno-gfx-test, and the window guard of
+  # the desktop.
   CC="${CC_AARCH64:-aarch64-linux-gnu-gcc}"
   "$CC" -shared -fPIC -O2 -Wall -o "$FS/usr/local/lib/libokno-nodumpable.so" "$ROOT_DIR/native/nodumpable.c"
-  "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-free-display" "$ROOT_DIR/native/free-display.c"
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-gpu-probe" "$ROOT_DIR/native/gpu-probe.c"
   # The same benchmark natively and as Windows programs (okno-gfx-test).
   "$CC" -O2 -Wall -o "$FS/usr/local/bin/okno-cpubench" "$ROOT_DIR/native/cpubench.c" -lm
@@ -174,7 +173,7 @@ EOF2
   # edited above. Not okno-slim: installing Windows support edits it.
   {
     (cd "$ROOT_DIR/rootfs-overlay" && find . \( -type f -o -type l \) ! -path './root/*')
-    printf '%s\n' ./usr/local/lib/libokno-nodumpable.so ./usr/local/bin/okno-free-display \
+    printf '%s\n' ./usr/local/lib/libokno-nodumpable.so \
       ./usr/local/bin/okno-gpu-probe ./usr/local/bin/okno-wm-guard ./usr/local/share/okno/packages.txt \
       ./usr/local/bin/okno-cpubench ./usr/local/lib/okno/cpubench64.exe ./usr/local/lib/okno/cpubench32.exe \
       ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml \

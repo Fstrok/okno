@@ -1,7 +1,6 @@
 package io.okno
 
 import android.Manifest
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -12,87 +11,54 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.graphics.Rect
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
-import android.view.KeyEvent
 import android.view.View
-import android.view.WindowInsets
-import android.view.WindowInsetsController
+import android.view.ViewGroup
 import android.widget.Button
-import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
-import io.okno.desktop.DesktopView
-import io.okno.desktop.Keysyms
-import io.okno.desktop.RfbClient
-import java.util.concurrent.Executors
+import com.termux.x11.LoriePreferences
+import com.termux.x11.MainActivity
 import kotlin.math.roundToInt
 
 /**
  * The app's main screen. First launch: one "Install" button. After that:
- * the Linux desktop, started automatically.
+ * the Linux desktop, started automatically and shown by Termux:X11's view
+ * (this activity is its MainActivity, with Okno's setup screens and menu
+ * on top). Back and the ☰ key open Okno's menu.
  */
-class DesktopActivity : Activity(), ServiceConnection {
-    private var service: LinuxService? = null
-    private lateinit var desktopView: DesktopView
-    private lateinit var extraKeys: ExtraKeysView
+class DesktopActivity : MainActivity(), ServiceConnection {
+    private var linux: LinuxService? = null
     private lateinit var overlay: View
     private lateinit var overlayTitle: TextView
     private lateinit var overlayText: TextView
     private lateinit var overlayProgress: ProgressBar
     private lateinit var overlayButton: Button
 
-    private val main = Handler(Looper.getMainLooper())
-    private val prefs by lazy { getSharedPreferences("okno", MODE_PRIVATE) }
-    // Keeps key events in order: one thread writes them all.
-    private val sendQueue = Executors.newSingleThreadExecutor()
-    private var socket: LocalSocket? = null
-    private var connection: Thread? = null
-
-    private val keysSafe = Rect()
+    private val settings by lazy { getSharedPreferences("okno", MODE_PRIVATE) }
+    private var wasConnected = false
 
     private val exitReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            disconnect()
-            finishAndRemoveTask()
-        }
+        override fun onReceive(context: Context, intent: Intent) = finishAndRemoveTask()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyDisplaySettings()
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_desktop)
-        desktopView = findViewById(R.id.desktop)
-        extraKeys = findViewById(R.id.extra_keys)
+        layoutInflater.inflate(R.layout.okno_overlay, findViewById<ViewGroup>(android.R.id.content))
         overlay = findViewById(R.id.overlay)
         overlayTitle = findViewById(R.id.overlay_title)
         overlayText = findViewById(R.id.overlay_text)
         overlayProgress = findViewById(R.id.overlay_progress)
         overlayButton = findViewById(R.id.overlay_button)
-
-        extraKeys.setKeys(ExtraKeysView.DESKTOP_KEYS)
-        extraKeys.listener = keysListener
-        desktopView.keySender = DesktopView.KeySender(::sendKey)
-        desktopView.onSizeChanged = { w, h -> resizeDesktop(w, h) }
-        desktopView.onClipboard = ::onDesktopClipboard
-        // In landscape the keys at both ends of the bar sit in the rounded bottom corners.
-        extraKeys.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-            SafeArea.insets(v, keysSafe)
-            if (v.paddingLeft != keysSafe.left || v.paddingRight != keysSafe.right) {
-                v.post { v.setPadding(keysSafe.left, 0, keysSafe.right, 0) }
-            }
-        }
-        hideSystemBars()
+        // Termux:X11 shows or hides its view on (dis)connection, which re-lays out the window.
+        window.decorView.viewTreeObserver.addOnGlobalLayoutListener { onConnectionMaybeChanged() }
 
         val filter = IntentFilter(LinuxService.ACTION_EXITED)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(exitReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -101,39 +67,28 @@ class DesktopActivity : Activity(), ServiceConnection {
 
     override fun onDestroy() {
         unregisterReceiver(exitReceiver)
-        sendQueue.shutdown()
         super.onDestroy()
     }
 
     override fun onStart() {
         super.onStart()
-        clipboard.addPrimaryClipChangedListener(clipboardListener)
         val intent = Intent(this, LinuxService::class.java)
         startForegroundService(intent)
         bindService(intent, this, 0)
     }
 
     override fun onStop() {
-        clipboard.removePrimaryClipChangedListener(clipboardListener)
-        disconnect()
-        if (service != null) unbindService(this)
-        service = null
+        if (linux != null) unbindService(this)
+        linux = null
         super.onStop()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            hideSystemBars()
-            // Android lets apps read the clipboard only while focused.
-            pushPhoneClipboard()
-        }
     }
 
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
         val svc = (binder as LinuxService.LocalBinder).service
-        service = svc
+        linux = svc
         when {
+            // Older systems bring their own X server: this app's desktop needs the new files.
+            svc.env.isInstalled && !svc.env.hasX11Desktop -> updateSystem()
             svc.env.isInstalled -> {
                 startDesktop()
                 offerSystemUpdate()
@@ -144,7 +99,38 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     override fun onServiceDisconnected(name: ComponentName) {
-        service = null
+        linux = null
+    }
+
+    /** Termux:X11 opens its settings from Back, the ☰ key and its notification: Okno's menu instead. */
+    override fun startActivity(intent: Intent) {
+        if (intent.component?.className == LoriePreferences::class.java.name && !intent.getBooleanExtra(EXTRA_X11_SETTINGS, false)) {
+            showMenu()
+        } else {
+            super.startActivity(intent)
+        }
+    }
+
+    /**
+     * Termux:X11's settings as Okno uses them: the desktop scaled to the
+     * chosen interface size, touches acting like a touchscreen, Okno's keys.
+     * Later changes in "Экран и ввод" are kept, except the scale.
+     */
+    private fun applyDisplaySettings() {
+        val x11 = getSharedPreferences("${packageName}_preferences", MODE_PRIVATE) // Termux:X11's settings
+        val shortSidePx = resources.displayMetrics.run { minOf(widthPixels, heightPixels) }
+        val shortSide = settings.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
+        val edit = x11.edit()
+            .putString("displayResolutionMode", "scaled")
+            .putInt("displayScale", (shortSidePx * 100f / shortSide).roundToInt().coerceIn(100, 300))
+        if (!settings.getBoolean(PREF_X11_DEFAULTS, false)) {
+            edit.putString("touchMode", "2")
+                .putBoolean("fullscreen", true)
+                .putString("backButtonAction", "open preferences")
+                .putString("extra_keys_config", EXTRA_KEYS)
+            settings.edit().putBoolean(PREF_X11_DEFAULTS, true).apply()
+        }
+        edit.apply()
     }
 
     // ---- install ----
@@ -158,7 +144,7 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     private fun install() {
-        val svc = service ?: return
+        val svc = linux ?: return
         showOverlay(getString(R.string.installing_title), getString(R.string.setup_installing, 0), progress = 0)
         svc.install(
             onProgress = { percent ->
@@ -186,89 +172,32 @@ class DesktopActivity : Activity(), ServiceConnection {
     // ---- desktop ----
 
     private fun startDesktop() {
-        val svc = service ?: return
-        if (desktopView.width == 0) {
-            // Desktop size depends on the view size; wait for the first layout.
-            desktopView.post { startDesktop() }
-            return
-        }
-        if (!svc.isDesktopRunning) {
-            val (w, h) = desktopSizeFor(desktopView.contentWidth, desktopView.contentHeight)
-            svc.startDesktop(w, h, DESKTOP_DPI)
-            showOverlay(getString(R.string.starting_title), getString(R.string.starting_text), progress = -1)
-        }
-        connect()
+        val svc = linux ?: return
+        if (!svc.isDesktopRunning) svc.startDesktop(DESKTOP_DPI)
+        else if (getLorieView().connected()) return
+        showOverlay(getString(R.string.starting_title), getString(R.string.starting_text), progress = -1)
+        overlay.removeCallbacks(startWatch)
+        overlay.postDelayed(startWatch, 1000)
     }
 
-    /** Desktop resolution: the view size scaled to the chosen interface size (shorter side). */
-    private fun desktopSizeFor(viewW: Int, viewH: Int): Pair<Int, Int> {
-        val shortSide = prefs.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
-        val factor = (minOf(viewW, viewH) / shortSide.toFloat()).coerceAtLeast(1f)
-        // Even sizes keep Xvnc and the scaling filter happy.
-        val w = ((viewW / factor).roundToInt() / 2) * 2
-        val h = ((viewH / factor).roundToInt() / 2) * 2
-        return w to h
-    }
-
-    private fun resizeDesktop(viewW: Int, viewH: Int) {
-        val client = desktopView.client ?: return
-        if (!client.supportsResize) return
-        val (w, h) = desktopSizeFor(viewW, viewH)
-        if (w != desktopView.framebuffer.width || h != desktopView.framebuffer.height) {
-            sendQueue.execute { runCatching { client.requestDesktopSize(w, h) } }
+    /** Until Termux:X11 connects: a desktop that died on the way is reported, not waited for. */
+    private val startWatch = object : Runnable {
+        override fun run() {
+            if (getLorieView().connected()) return
+            if (linux?.isDesktopRunning == false) onDesktopLost() else overlay.postDelayed(this, 1000)
         }
     }
 
-    private fun connect() {
-        if (connection?.isAlive == true) return
-        val svc = service ?: return
-        val socketFile = svc.desktopSocket
-        connection = Thread {
-            val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
-            var lastError: Throwable? = null
-            while (System.currentTimeMillis() < deadline && !Thread.currentThread().isInterrupted) {
-                val s = LocalSocket()
-                try {
-                    s.connect(LocalSocketAddress(socketFile.absolutePath, LocalSocketAddress.Namespace.FILESYSTEM))
-                    socket = s
-                    val client = RfbClient(s.inputStream, s.outputStream, desktopView.framebuffer)
-                    client.listener = desktopView
-                    main.post {
-                        desktopView.client = client
-                        hideOverlay()
-                        pushPhoneClipboard()
-                    }
-                    client.run() // until the connection breaks
-                } catch (e: Exception) {
-                    // Any failure, including a malformed message, just ends this connection.
-                    lastError = e
-                    runCatching { s.close() }
-                    if (socket === s) break // was connected: the desktop went away
-                    try {
-                        Thread.sleep(RETRY_DELAY_MS)
-                    } catch (_: InterruptedException) {
-                        return@Thread
-                    }
-                }
-            }
-            if (Thread.currentThread().isInterrupted) return@Thread
-            Log.w(TAG, "desktop connection ended", lastError)
-            main.post { onDesktopLost() }
-        }.apply { start() }
-    }
-
-    private fun disconnect() {
-        connection?.interrupt()
-        connection = null
-        runCatching { socket?.close() }
-        socket = null
-        desktopView.client = null
+    private fun onConnectionMaybeChanged() {
+        val connected = getLorieView()?.connected() ?: return
+        if (connected == wasConnected) return
+        wasConnected = connected
+        if (connected) hideOverlay()
+        else if (linux?.isDesktopRunning == false) onDesktopLost()
     }
 
     private fun onDesktopLost() {
-        desktopView.client = null
-        socket = null
-        val log = service?.desktopLog().orEmpty().lines().takeLast(12).joinToString("\n")
+        val log = linux?.desktopLog().orEmpty().lines().takeLast(12).joinToString("\n")
         showOverlay(
             title = getString(R.string.desktop_stopped_title),
             text = getString(R.string.desktop_stopped_text) + if (log.isNotBlank()) "\n\n$log" else "",
@@ -277,151 +206,53 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     private fun restartDesktop() {
-        disconnect()
-        service?.stopDesktop()
+        linux?.stopDesktop()
         startDesktop()
     }
 
-    // ---- clipboard ----
-    //
-    // Copy on either side, paste on the other. lastClipboard stops the text
-    // from bouncing back and forth.
+    // ---- menu ----
 
-    private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
-    private var lastClipboard: String? = null
-    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { pushPhoneClipboard() }
-
-    private fun phoneClipboardText(): String? = runCatching {
-        clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
-    }.getOrNull()
-
-    private fun pushPhoneClipboard() {
-        val client = desktopView.client ?: return
-        val text = phoneClipboardText()
-        if (text.isNullOrEmpty() || text == lastClipboard) return
-        lastClipboard = text
-        sendQueue.execute { runCatching { client.sendClipboard(text) } }
+    private fun showMenu() {
+        val svc = linux ?: return
+        val items = buildList {
+            add("Программы…" to ::showProgramsDialog)
+            add("Терминал" to { startActivity(Intent(this@DesktopActivity, TerminalActivity::class.java)) })
+            add("Тест графики" to { runInTerminal("okno-gfx-test") })
+            add("Перезапустить рабочий стол" to ::restartDesktop)
+            add("Размер интерфейса…" to ::showUiSizeDialog)
+            add("Экран и ввод…" to {
+                startActivity(Intent(this@DesktopActivity, LoriePreferences::class.java)
+                    .setAction(Intent.ACTION_MAIN).putExtra(EXTRA_X11_SETTINGS, true))
+            })
+            if (!hasStorage()) add("Доступ к файлам телефона" to ::askStorage)
+            add("Сеть…" to {
+                AlertDialog.Builder(this@DesktopActivity).setTitle("Сеть").setMessage(svc.networkSummary())
+                    .setPositiveButton(android.R.string.ok, null).show()
+            })
+            add((if (svc.isSshRunning) "Удалённый доступ (SSH): вкл" else "Удалённый доступ (SSH)…") to ::showSshDialog)
+            add((if (svc.isHoldingWakeLock) "✓ Не засыпать" else "Не засыпать") to svc::toggleWakeLock)
+            if (!getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) {
+                add("Не ограничивать в фоне" to {
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+                })
+            }
+            add("Выход" to svc::exit)
+        }
+        AlertDialog.Builder(this)
+            .setItems(items.map { it.first }.toTypedArray()) { _, which -> items[which].second() }
+            .show()
     }
 
-    /**
-     * The 📋 key: what was copied on the phone goes to the desktop and is
-     * pasted where the cursor is. Shift+Insert pastes in GTK and Qt programs,
-     * browsers, Windows programs and terminals alike (Xvnc sets the PRIMARY
-     * selection too, which terminals paste with it).
-     */
-    private fun pasteFromPhone() {
-        val client = desktopView.client ?: return
-        val text = phoneClipboardText()
-        if (text.isNullOrEmpty()) {
-            Toast.makeText(this, "Буфер обмена телефона пуст", Toast.LENGTH_SHORT).show()
-            return
-        }
-        lastClipboard = text
-        sendQueue.execute {
-            runCatching {
-                client.sendClipboard(text)
-                client.sendKey(Keysyms.SHIFT_L, true)
-                client.sendKey(Keysyms.INSERT, true)
-                client.sendKey(Keysyms.INSERT, false)
-                client.sendKey(Keysyms.SHIFT_L, false)
+    private fun askStorage() {
+        AlertDialog.Builder(this)
+            .setTitle("Файлы телефона")
+            .setMessage("Память телефона появится в проводнике как «Телефон» (/sdcard). " +
+                "Для этого рабочий стол перезапустится, открытые программы закроются.")
+            .setPositiveButton("Разрешить") { _, _ ->
+                requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_LATER)
             }
-        }
-    }
-
-    private fun onDesktopClipboard(text: String) {
-        if (text == lastClipboard) return
-        lastClipboard = text
-        clipboard.setPrimaryClip(ClipData.newPlainText("Okno", text))
-    }
-
-    // ---- keys ----
-
-    /** One key press; on-screen Ctrl/Alt toggles wrap it like held modifiers. */
-    private fun sendKey(keysym: Int) {
-        val client = desktopView.client ?: return
-        val modifiers = extraKeys.consumeAll().map {
-            when (it) {
-                ExtraKeysView.Modifier.CTRL -> Keysyms.CONTROL_L
-                ExtraKeysView.Modifier.ALT -> Keysyms.ALT_L
-                ExtraKeysView.Modifier.WIN -> Keysyms.SUPER_L
-            }
-        }
-        sendQueue.execute {
-            runCatching {
-                modifiers.forEach { client.sendKey(it, true) }
-                client.sendKey(keysym, true)
-                client.sendKey(keysym, false)
-                modifiers.asReversed().forEach { client.sendKey(it, false) }
-            }
-        }
-    }
-
-    private val keysListener = object : ExtraKeysView.Listener {
-        override fun onKey(keyCode: Int) {
-            Keysyms.fromKeyCode(keyCode)?.let(::sendKey)
-        }
-
-        override fun onText(codePoint: Int) = sendKey(Keysyms.fromCodePoint(codePoint))
-
-        override fun onButton(id: String, anchor: View) {
-            when (id) {
-                ExtraKeysView.BUTTON_KEYBOARD -> desktopView.toggleKeyboard()
-                ExtraKeysView.BUTTON_PASTE -> pasteFromPhone()
-                ExtraKeysView.BUTTON_MENU -> showMenu(anchor)
-            }
-        }
-    }
-
-    private fun showMenu(anchor: View) {
-        val svc = service ?: return
-        val menu = PopupMenu(this, anchor)
-        menu.menu.add(0, MENU_PROGRAMS, 0, "Программы…")
-        menu.menu.add(0, MENU_TERMINAL, 0, "Терминал")
-        menu.menu.add(0, MENU_GFX_TEST, 0, "Тест графики")
-        menu.menu.add(0, MENU_RESTART, 1, "Перезапустить рабочий стол")
-        menu.menu.add(0, MENU_UI_SIZE, 2, "Размер интерфейса…")
-        if (!hasStorage()) menu.menu.add(0, MENU_STORAGE, 2, "Доступ к файлам телефона")
-        menu.menu.add(0, MENU_NETWORK, 2, "Сеть…")
-        menu.menu.add(0, MENU_SSH, 2, if (svc.isSshRunning) "Удалённый доступ (SSH): вкл" else "Удалённый доступ (SSH)…")
-        menu.menu.add(0, MENU_WAKE, 3, "Не засыпать").apply {
-            isCheckable = true
-            isChecked = svc.isHoldingWakeLock
-        }
-        if (!getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) {
-            menu.menu.add(0, MENU_BATTERY, 4, "Не ограничивать в фоне")
-        }
-        menu.menu.add(0, MENU_EXIT, 5, "Выход")
-        menu.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                MENU_PROGRAMS -> showProgramsDialog()
-                MENU_UI_SIZE -> showUiSizeDialog()
-                MENU_STORAGE -> AlertDialog.Builder(this)
-                    .setTitle("Файлы телефона")
-                    .setMessage("Память телефона появится в проводнике как «Телефон» (/sdcard). " +
-                        "Для этого рабочий стол перезапустится, открытые программы закроются.")
-                    .setPositiveButton("Разрешить") { _, _ ->
-                        requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQUEST_STORAGE_LATER)
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
-                MENU_TERMINAL -> startActivity(Intent(this, TerminalActivity::class.java))
-                MENU_GFX_TEST -> runInTerminal("okno-gfx-test")
-                MENU_RESTART -> restartDesktop()
-                MENU_NETWORK -> AlertDialog.Builder(this)
-                    .setTitle("Сеть")
-                    .setMessage(svc.networkSummary())
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
-                MENU_SSH -> showSshDialog()
-                MENU_WAKE -> svc.toggleWakeLock()
-                MENU_BATTERY -> startActivity(
-                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
-                )
-                MENU_EXIT -> svc.exit()
-            }
-            true
-        }
-        menu.show()
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /**
@@ -430,10 +261,10 @@ class DesktopActivity : Activity(), ServiceConnection {
      * Asked once per version, never forced.
      */
     private fun offerSystemUpdate() {
-        val svc = service ?: return
+        val svc = linux ?: return
         val bundled = RootfsInstaller.bundledVersion(this)
         if (bundled == "unknown" || svc.env.installedVersion == bundled) return
-        if (prefs.getString(PREF_DECLINED_UPDATE, null) == bundled) return
+        if (settings.getString(PREF_DECLINED_UPDATE, null) == bundled) return
         AlertDialog.Builder(this)
             .setTitle("Обновление системы")
             .setMessage(
@@ -443,15 +274,14 @@ class DesktopActivity : Activity(), ServiceConnection {
             )
             .setPositiveButton("Обновить") { _, _ -> updateSystem() }
             .setNegativeButton("Не сейчас") { _, _ ->
-                prefs.edit().putString(PREF_DECLINED_UPDATE, bundled).apply()
+                settings.edit().putString(PREF_DECLINED_UPDATE, bundled).apply()
             }
             .setNeutralButton("Переустановить начисто") { _, _ -> confirmReinstall() }
             .show()
     }
 
     private fun updateSystem() {
-        val svc = service ?: return
-        disconnect()
+        val svc = linux ?: return
         svc.stopDesktop()
         showOverlay("Обновление системы", "Обновляю файлы Okno…", progress = -1)
         svc.updateSystem { error ->
@@ -479,8 +309,7 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     private fun reinstallSystem() {
-        val svc = service ?: return
-        disconnect()
+        val svc = linux ?: return
         svc.stopDesktop()
         svc.stopSsh()
         svc.sessions.toList().forEach { svc.removeSession(it) }
@@ -488,13 +317,13 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     private fun showUiSizeDialog() {
-        val current = prefs.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
+        val current = settings.getInt(PREF_SHORT_SIDE, UI_SIZES[1].first)
         AlertDialog.Builder(this)
             .setTitle("Размер интерфейса")
             .setSingleChoiceItems(UI_SIZES.map { it.second }.toTypedArray(), UI_SIZES.indexOfFirst { it.first == current }) { dialog, which ->
-                prefs.edit().putInt(PREF_SHORT_SIDE, UI_SIZES[which].first).apply()
-                // Applied live: the desktop changes resolution, nothing restarts.
-                resizeDesktop(desktopView.contentWidth, desktopView.contentHeight)
+                settings.edit().putInt(PREF_SHORT_SIDE, UI_SIZES[which].first).apply()
+                // Applied live: Termux:X11 follows its settings, the desktop changes resolution.
+                applyDisplaySettings()
                 dialog.dismiss()
             }
             .show()
@@ -507,6 +336,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         when (requestCode) {
             REQUEST_STORAGE_FIRST -> startDesktop()
             REQUEST_STORAGE_LATER -> if (hasStorage()) restartDesktop()
+            else -> super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         }
     }
 
@@ -536,7 +366,7 @@ class DesktopActivity : Activity(), ServiceConnection {
     }
 
     private fun showSshDialog() {
-        val svc = service ?: return
+        val svc = linux ?: return
         val builder = AlertDialog.Builder(this).setTitle("Удалённый доступ (SSH)")
         if (!svc.isSshRunning) {
             builder.setMessage(
@@ -564,7 +394,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         }
         builder.setMessage(message)
             .setPositiveButton("Скопировать команду") { _, _ ->
-                clipboard.setPrimaryClip(ClipData.newPlainText("SSH", command))
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("SSH", command))
             }
             .setNegativeButton("Выключить") { _, _ -> svc.stopSsh() }
             .setNeutralButton("Новый пароль") { _, _ ->
@@ -572,19 +402,6 @@ class DesktopActivity : Activity(), ServiceConnection {
                 showSshDialog()
             }
             .show()
-    }
-
-    @Deprecated("Activity is the platform class; targetSdk 28 still routes Back here")
-    override fun onBackPressed() {
-        moveTaskToBack(true)
-    }
-
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Hardware keyboards type into the desktop even when another view has focus.
-        if (overlay.visibility != View.VISIBLE && !desktopView.hasFocus() && !event.isSystem) {
-            desktopView.requestFocus()
-        }
-        return super.dispatchKeyEvent(event)
     }
 
     // ---- overlay ----
@@ -603,43 +420,21 @@ class DesktopActivity : Activity(), ServiceConnection {
 
     private fun hideOverlay() {
         overlay.visibility = View.GONE
-        desktopView.requestFocus()
-    }
-
-    @Suppress("DEPRECATION")
-    private fun hideSystemBars() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.insetsController?.let {
-                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        }
     }
 
     companion object {
         private const val TAG = "Okno"
         private const val DESKTOP_DPI = 132
-        private const val CONNECT_TIMEOUT_MS = 60_000L
-        private const val RETRY_DELAY_MS = 300L
-        private const val MENU_TERMINAL = 1
-        private const val MENU_RESTART = 2
-        private const val MENU_NETWORK = 3
-        private const val MENU_WAKE = 4
-        private const val MENU_BATTERY = 5
-        private const val MENU_EXIT = 6
-        private const val MENU_SSH = 7
-        private const val MENU_PROGRAMS = 8
-        private const val MENU_UI_SIZE = 9
-        private const val MENU_STORAGE = 10
-        private const val MENU_GFX_TEST = 11
         private const val REQUEST_STORAGE_FIRST = 1
         private const val REQUEST_STORAGE_LATER = 2
         private const val PREF_SHORT_SIDE = "desktop_short_side"
         private const val PREF_DECLINED_UPDATE = "declined_system_update"
+        private const val PREF_X11_DEFAULTS = "x11_defaults"
+        private const val EXTRA_X11_SETTINGS = "io.okno.X11_SETTINGS"
+
+        /** Two rows that fit a phone in portrait: ☰ opens Okno's menu, ⎘ pastes the phone's clipboard. */
+        private const val EXTRA_KEYS = "[['DRAWER','KEYBOARD','PASTE','ESC','TAB','HOME','UP','END','PGUP'], " +
+            "['CTRL','ALT','META','ENTER','DEL','LEFT','DOWN','RIGHT','PGDN']]"
 
         /** Desktop height (landscape) for each interface size: fewer pixels, bigger UI. */
         private val UI_SIZES = listOf(600 to "Крупный", 720 to "Обычный", 900 to "Мелкий")

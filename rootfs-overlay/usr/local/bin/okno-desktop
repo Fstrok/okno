@@ -1,12 +1,8 @@
 #!/bin/sh
-# Starts the desktop for the Okno app: Xvnc reachable only through a Unix
-# socket inside the app's private storage, then XFCE on it.
-#   okno-desktop WIDTH HEIGHT DPI
-W=${1:-1600}
-H=${2:-900}
-DPI=${3:-120}
-SOCK_DIR=/tmp/.okno
-
+# Starts XFCE for the Okno app on the X server it runs on the Android side
+# (Termux:X11, see LinuxService.startDesktop): its socket is in /tmp/.X11-unix.
+#   okno-desktop :DISPLAY
+export DISPLAY=${1:-:1}
 export HOME=/root USER=root LOGNAME=root SHELL=/bin/bash
 export LANG=ru_RU.UTF-8 LANGUAGE=ru_RU:ru
 export XDG_RUNTIME_DIR=/tmp/runtime-root XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
@@ -15,51 +11,21 @@ export NO_AT_BRIDGE=1
 export MOZ_DISABLE_CONTENT_SANDBOX=1 MOZ_DISABLE_GMP_SANDBOX=1 MOZ_DISABLE_RDD_SANDBOX=1
 export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1 MOZ_DISABLE_UTILITY_SANDBOX=1
 
-mkdir -p "$SOCK_DIR" "$XDG_RUNTIME_DIR" /tmp/.X11-unix
-chmod 700 "$SOCK_DIR" "$XDG_RUNTIME_DIR"
-chmod 1777 /tmp/.X11-unix
-
-# A desktop from an earlier run may have outlived its proot: stop it, or it
-# keeps its display. Only if that PID still is an X server: PIDs get reused.
-for lock in /tmp/.X*-lock; do
-  [ -f "$lock" ] || continue
-  old=$(tr -dc 0-9 < "$lock")
-  if [ -n "$old" ] && tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null | grep -q Xvnc; then
-    kill "$old"
-    sleep 1
-  fi
-  rm -f "$lock"
-done
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+# A session from an earlier run may have outlived its proot.
 pkill -x xfce4-session 2>/dev/null
-rm -f /tmp/.X11-unix/X* "$SOCK_DIR/vnc.sock" /root/.ICEauthority
-
-# X clients try the abstract socket @/tmp/.X11-unix/X<n> first, and those
-# names are shared by all apps on the phone: if another app (a VNC server in
-# Termux, say) holds :1, our clients get "Permission denied" and never reach
-# our socket. So take the first display number nobody else uses.
-D=$(okno-free-display 1) || D=1
-export DISPLAY=:$D
-echo "okno-desktop: display :$D"
-
-# Only private Unix socket files: no TCP and no abstract socket of our own.
-# The phone's clipboard follows explicit copies (CLIPBOARD), not every mouse
-# selection (PRIMARY).
-Xvnc ":$D" -geometry "${W}x${H}" -depth 24 -dpi "$DPI" \
-  -rfbunixpath "$SOCK_DIR/vnc.sock" -rfbport -1 -SecurityTypes None \
-  -AlwaysShared -AcceptSetDesktopSize -nolisten tcp -nolisten local \
-  -SendPrimary=0 &
-XVNC=$!
-trap 'kill $XVNC 2>/dev/null' EXIT INT TERM
+rm -f /root/.ICEauthority
 
 i=0
-while [ ! -S "/tmp/.X11-unix/X$D" ] && [ $i -lt 200 ]; do
+while [ ! -S "/tmp/.X11-unix/X${DISPLAY#:}" ] && [ $i -lt 300 ]; do
   sleep 0.1
   i=$((i + 1))
 done
+echo "okno-desktop: display $DISPLAY"
 
 # Latin and Russian on the same keys (levels 1-2 / 3-4, see the okno XKB
-# layout), so text typed on the phone always maps to a real key. Otherwise
-# Xvnc remaps spare keys on the fly and apps can read the wrong letter.
+# layout): text typed on the phone finds its letters in the keymap.
 setxkbmap -layout okno
 
 # Keeps windows inside the screen and opens big ones maximized (phone screen).
@@ -67,4 +33,4 @@ okno-wm-guard &
 # After an in-place system update: installs packages the new version needs.
 okno-system-update &
 
-dbus-launch --exit-with-session startxfce4
+exec dbus-launch --exit-with-session startxfce4
