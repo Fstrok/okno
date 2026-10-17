@@ -1,0 +1,119 @@
+#!/bin/bash
+# Eyes and hands on the Okno desktop, for Claude Code (and scripts): takes
+# screenshots and clicks, types and presses keys like the user would. Works
+# with any program on the desktop, Windows programs included.
+#
+# Screenshots are scaled down to at most 1280 px on the long side (a phone
+# screen is too big to send whole); the coordinates the other commands take
+# are those of the latest screenshot and are scaled back to the screen.
+#
+#   okno-screen shot [FILE]        screenshot → PNG (default /tmp/okno-screen.png)
+#   okno-screen click X Y          left click     (also: dclick, rclick, mclick)
+#   okno-screen move X Y           move the pointer
+#   okno-screen drag X1 Y1 X2 Y2   drag with the left button
+#   okno-screen scroll up|down [N] scroll N steps (default 5) at the pointer
+#   okno-screen type TEXT          type text (Russian too) into the focused window
+#   okno-screen key KEY...         keys and combos: Return ctrl+l alt+F4 super
+#   okno-screen windows            list windows: id, desktop, title
+#   okno-screen focus TITLE        bring the first window whose title matches to front
+#   okno-screen size               screen size and the current screenshot scale
+set -euo pipefail
+
+MAX=1280
+STATE=/tmp/.okno/screen-scale
+
+die() { echo "okno-screen: $*" >&2; exit 1; }
+
+# The desktop's display: okno-desktop picks the first free number, so look
+# for our Xvnc when DISPLAY is unset (SSH sessions, scripts).
+if [ -z "${DISPLAY:-}" ]; then
+  for lock in /tmp/.X*-lock; do
+    [ -f "$lock" ] || continue
+    pid=$(tr -dc 0-9 < "$lock")
+    if [ -n "$pid" ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q Xvnc; then
+      lock=${lock#/tmp/.X}
+      export DISPLAY=":${lock%-lock}"
+      break
+    fi
+  done
+fi
+[ -n "${DISPLAY:-}" ] || die "рабочий стол не запущен (откройте приложение Okno)"
+command -v xdotool > /dev/null && command -v scrot > /dev/null ||
+  die "нет xdotool/scrot: apt install xdotool scrot wmctrl"
+
+# Percent of the screen size the screenshots have (100 = full size).
+scale() { cat "$STATE" 2>/dev/null || echo 100; }
+# Screenshot coordinates → screen coordinates.
+real() { echo $(( ($1 * 100 + $(scale) / 2) / $(scale) )); }
+num() { [[ ${1:-} =~ ^[0-9]+$ ]] || die "ожидалось число, а не '${1:-}'"; }
+at() { num "${1:-}"; num "${2:-}"; xdotool mousemove --sync "$(real "$1")" "$(real "$2")"; }
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  shot)
+    out=${1:-/tmp/okno-screen.png}
+    read -r w h < <(xdotool getdisplaygeometry)
+    long=$(( w > h ? w : h ))
+    pct=$(( long > MAX ? MAX * 100 / long : 100 ))
+    mkdir -p "$(dirname "$STATE")"
+    tmp=$(mktemp -d)
+    if [ "$pct" -lt 100 ]; then
+      scrot -o -p -t "$pct" "$tmp/s.png"
+      mv "$tmp/s-thumb.png" "$out"
+    else
+      scrot -o -p "$tmp/s.png"
+      mv "$tmp/s.png" "$out"
+    fi
+    rm -rf "$tmp"
+    echo "$pct" > "$STATE"
+    echo "$out ($(( w * pct / 100 ))x$(( h * pct / 100 )), экран ${w}x${h})"
+    ;;
+  click)  at "$@"; xdotool click 1 ;;
+  dclick) at "$@"; xdotool click --repeat 2 --delay 120 1 ;;
+  rclick) at "$@"; xdotool click 3 ;;
+  mclick) at "$@"; xdotool click 2 ;;
+  move)   at "$@" ;;
+  drag)
+    at "${1:-}" "${2:-}"
+    xdotool mousedown 1
+    at "${3:-}" "${4:-}"
+    sleep 0.1
+    xdotool mouseup 1
+    ;;
+  scroll)
+    case "${1:-}" in up) b=4 ;; down) b=5 ;; *) die "scroll up|down [N]" ;; esac
+    n=${2:-5}; num "$n"
+    xdotool click --repeat "$n" --delay 40 "$b"
+    ;;
+  type)
+    [ $# -gt 0 ] || die "type TEXT"
+    # xdotool reads the text in the locale's encoding: make it UTF-8.
+    LC_ALL=C.UTF-8 xdotool type --delay 25 -- "$*"
+    ;;
+  key)
+    [ $# -gt 0 ] || die "key KEY..."
+    xdotool key --delay 60 -- "$@"
+    ;;
+  windows)
+    if ! { command -v wmctrl > /dev/null && wmctrl -l 2> /dev/null; }; then
+      for id in $(xdotool search --onlyvisible --name .); do
+        printf '0x%08x  %s\n' "$id" "$(xdotool getwindowname "$id")"
+      done
+    fi
+    ;;
+  focus)
+    [ $# -gt 0 ] || die "focus TITLE"
+    id=$(xdotool search --onlyvisible --name "$*" | head -n1)
+    [ -n "$id" ] || die "нет окна с заголовком «$*»"
+    xdotool windowactivate --sync "$id"
+    ;;
+  size)
+    read -r w h < <(xdotool getdisplaygeometry)
+    echo "экран ${w}x${h}, снимок $(scale)% ($(( w * $(scale) / 100 ))x$(( h * $(scale) / 100 )))"
+    ;;
+  *)
+    sed -n '2,/^set /{/^set /d;s/^# \{0,1\}//;p}' "$0"
+    [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 2
+    ;;
+esac

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(okno-screen *)",
+      "mcp__browser"
+    ]
+  }
+}

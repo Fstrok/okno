@@ -2,6 +2,8 @@
 # Claude Code, ready to type: the first run downloads it with the official
 # installer (into ~/.local, where it keeps itself up to date), later runs
 # start it right away. It needs the internet anyway, so it is not bundled.
+# It also gets a browser it drives on the desktop (okno-browser-mcp); what
+# it should know about Okno is in /etc/claude-code/CLAUDE.md.
 real="$HOME/.local/bin/claude"
 if [ ! -x "$real" ]; then
   echo "Первый запуск: устанавливаю Claude Code (около 90 МБ)…"
@@ -11,5 +13,17 @@ if [ ! -x "$real" ]; then
     echo "Не удалось установить Claude Code. Проверьте интернет и запустите снова." >&2
     exit 1
   fi
+fi
+
+# The browser installs from a terminal only: its output must not mix into
+# scripts' use of claude. Without it Claude Code still works.
+if ! command -v playwright-mcp > /dev/null && [ -t 0 ] && [ -t 1 ]; then
+  echo "Устанавливаю браузер для Claude: Chromium и Node.js (около 300 МБ, один раз)…"
+  okno-install claude-browser ||
+    echo "Браузер для Claude не установился (нет интернета?). Попробую при следующем запуске." >&2
+fi
+if command -v playwright-mcp > /dev/null && ! grep -q okno-browser-mcp "$HOME/.claude.json" 2> /dev/null; then
+  "$real" mcp add --scope user browser -- okno-browser-mcp > /dev/null ||
+    echo "Не удалось подключить браузер к Claude Code." >&2
 fi
 exec "$real" "$@"
