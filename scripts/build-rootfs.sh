@@ -34,6 +34,8 @@ main() {
     fonts-dejavu-core fonts-noto-color-emoji
     # remote access (started from the app, see rootfs-overlay/usr/local/bin/okno-ssh)
     openssh-server
+    # Claude Code's eyes and hands on the desktop (okno-screen)
+    xdotool scrot wmctrl
     # base tools (zstd: Claude Code's installer downloads 3x less with it)
     locales ca-certificates curl nano less procps psmisc xdg-utils bash-completion zstd xz-utils
   )

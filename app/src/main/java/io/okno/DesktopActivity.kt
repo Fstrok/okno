@@ -647,7 +647,7 @@ class DesktopActivity : Activity(), ServiceConnection {
         /** okno-install names (rootfs-overlay/usr/local/bin/okno-install) and labels. */
         private val PROGRAMS = listOf(
             "windows" to "Windows-программы (.exe, 32 и 64 бит)",
-            "claude" to "Claude Code — ИИ-помощник в терминале",
+            "claude" to "Claude Code — ИИ-помощник, сам работает в браузере",
             "vscode" to "VS Code — редактор кода",
             "firefox" to "Firefox — браузер",
             "chromium" to "Chromium — браузер",
