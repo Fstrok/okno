@@ -27,15 +27,15 @@
         android:id="@+id/overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#0B1020"
+        android:background="@drawable/bg_overlay"
         android:clickable="true"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="32dp">
 
         <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
             android:contentDescription="@null"
             android:src="@mipmap/ic_launcher" />
 
@@ -43,41 +43,51 @@
             android:id="@+id/overlay_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="24dp"
+            android:fontFamily="sans-serif-medium"
             android:gravity="center"
+            android:letterSpacing="0.01"
             android:textColor="#FFFFFF"
-            android:textSize="26sp"
-            android:textStyle="bold" />
+            android:textSize="28sp" />
 
+        <!-- Fixed two-line height: text changes during setup do not shift the layout. -->
         <TextView
             android:id="@+id/overlay_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:gravity="center"
-            android:maxWidth="480dp"
-            android:textColor="#B8C0D0"
+            android:lineSpacingMultiplier="1.15"
+            android:maxWidth="400dp"
+            android:minLines="2"
+            android:textColor="#AAB4CC"
             android:textSize="16sp" />
 
         <ProgressBar
             android:id="@+id/overlay_progress"
             style="@android:style/Widget.Material.ProgressBar.Horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_width="280dp"
+            android:layout_height="6dp"
+            android:layout_marginTop="28dp"
+            android:indeterminateTint="@color/accent"
             android:max="100"
-            android:maxWidth="480dp"
+            android:progressDrawable="@drawable/progress_bar"
             android:visibility="gone" />
 
         <Button
             android:id="@+id/overlay_button"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:minWidth="200dp"
-            android:paddingTop="14dp"
-            android:paddingBottom="14dp"
-            android:textSize="18sp"
+            android:layout_height="56dp"
+            android:layout_marginTop="32dp"
+            android:background="@drawable/btn_primary"
+            android:elevation="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:minWidth="240dp"
+            android:paddingHorizontal="32dp"
+            android:stateListAnimator="@null"
+            android:textAllCaps="false"
+            android:textColor="#0B1020"
+            android:textSize="17sp"
             android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

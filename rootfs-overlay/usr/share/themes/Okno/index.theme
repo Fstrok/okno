@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=Okno
+Comment=Arc-Dark, tuned for touch
+
+[X-GNOME-Metatheme]
+GtkTheme=Okno
+MetacityTheme=Okno
+IconTheme=elementary-xfce-dark

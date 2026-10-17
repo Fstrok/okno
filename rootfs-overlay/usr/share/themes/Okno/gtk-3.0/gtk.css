@@ -1,0 +1,15 @@
+/* Okno: Arc-Dark with targets sized for a finger. */
+@import url("resource:///org/gnome/arc-theme/gtk-main-dark.css");
+
+menuitem, modelbutton { min-height: 34px; padding: 4px 12px; }
+button { min-height: 32px; min-width: 32px; }
+entry { min-height: 34px; }
+scrollbar slider { min-width: 8px; min-height: 8px; }
+treeview.view { padding: 4px 2px; }
+
+/* Taskbar: the active window marked by an accent line, not a solid block. */
+.xfce4-panel.panel .tasklist > button.flat:checked { background-color: alpha(#7aa2f7, 0.18); box-shadow: inset 0 -3px #7aa2f7; }
+
+/* Everything runs as root under proot: Thunar's root warning is noise. */
+window.thunar infobar * { min-height: 0; margin: 0; padding: 0; border: none; box-shadow: none; background: none; font-size: 0; }
+window.thunar infobar { margin-bottom: -16px; } /* the bar's fixed 8 px border, both sides */

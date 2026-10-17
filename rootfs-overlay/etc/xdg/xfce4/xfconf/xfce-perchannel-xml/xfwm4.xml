@@ -2,7 +2,8 @@
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
     <!-- Large title bar buttons, spaced apart: easy to hit with a finger. -->
-    <property name="theme" type="string" value="Default-hdpi"/>
+    <property name="theme" type="string" value="Okno"/>
+    <property name="title_font" type="string" value="Inter Variable Semi-Bold 10"/>
     <property name="button_layout" type="string" value="O|HMC"/>
     <property name="title_alignment" type="string" value="left"/>
     <!-- No GPU behind Xvnc: compositing only costs CPU. -->

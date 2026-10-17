@@ -33,7 +33,7 @@ jobs:
             app/src/main/assets/rootfs.tgz
             app/src/main/assets/rootfs.version
             app/src/main/assets/okno-update.tgz
-          key: rootfs-${{ hashFiles('scripts/build-rootfs.sh', 'scripts/fetch-rootfs.sh', 'scripts/build-proot.sh', 'scripts/xfconf-set.py', 'native/**', 'rootfs-overlay/**') }}
+          key: rootfs-${{ hashFiles('scripts/build-rootfs.sh', 'scripts/fetch-rootfs.sh', 'scripts/build-proot.sh', 'scripts/xfconf-set.py', 'scripts/xfwm4-theme.py', 'native/**', 'rootfs-overlay/**') }}
 
       - name: Build Linux system image
         if: steps.rootfs-cache.outputs.cache-hit != 'true'

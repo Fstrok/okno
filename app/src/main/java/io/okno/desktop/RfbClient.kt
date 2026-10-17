@@ -42,7 +42,7 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
     private val input = DataInputStream(input.buffered(1 shl 16))
     private val output = BufferedOutputStream(output, 1 shl 12)
     private val writeLock = Any()
-    private var rowBytes = ByteArray(0)
+    private var rectBytes = ByteArray(0)
 
     @Volatile
     var supportsResize = false
@@ -132,18 +132,19 @@ class RfbClient(input: InputStream, output: OutputStream, private val framebuffe
         requestUpdate(incremental = true)
     }
 
+    /** Reads the whole rectangle off the socket first, so the lock is held only for bulk copies. */
     private fun readRaw(x: Int, y: Int, w: Int, h: Int) {
-        val bytesPerRow = w * 4
-        if (rowBytes.size < bytesPerRow) rowBytes = ByteArray(bytesPerRow)
-        val rowInts = ByteBuffer.wrap(rowBytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer()
-        val pixels = framebuffer.pixels
-        val stride = framebuffer.width
-        for (row in 0 until h) {
-            input.readFully(rowBytes, 0, bytesPerRow)
-            synchronized(framebuffer) {
+        val size = w * h * 4
+        if (rectBytes.size < size) rectBytes = ByteArray(size)
+        input.readFully(rectBytes, 0, size)
+        val ints = ByteBuffer.wrap(rectBytes, 0, size).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer()
+        synchronized(framebuffer) {
+            val pixels = framebuffer.pixels
+            val stride = framebuffer.width
+            for (row in 0 until h) {
                 val base = (y + row) * stride + x
-                rowInts.rewind()
-                for (col in 0 until w) pixels[base + col] = rowInts.get() or OPAQUE
+                ints.get(pixels, base, w)
+                for (i in base until base + w) pixels[i] = pixels[i] or OPAQUE
             }
         }
         listener?.onFrame(x, y, w, h)
