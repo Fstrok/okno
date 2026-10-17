@@ -10,6 +10,44 @@ permissions:
   contents: write
 
 jobs:
+  # «Очистка» (cleaner/): its own small Gradle build, independent of Okno.
+  cleaner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and lint
+        run: ./gradlew -p cleaner assembleRelease lintDebug --console=plain
+
+      - name: Rename APK
+        run: |
+          mv cleaner/build/outputs/apk/release/cleaner-release.apk "cleaner-$(git rev-parse --short HEAD).apk"
+          echo "APK=cleaner-$(git rev-parse --short HEAD).apk" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cleaner-apk
+          path: ${{ env.APK }}
+          compression-level: 0
+
+      - name: Publish cleaner-dev release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete cleaner-dev --cleanup-tag --yes || true
+          gh release create cleaner-dev "$APK" --prerelease --target "$GITHUB_SHA" \
+            --title "Очистка dev ($(git rev-parse --short HEAD))" \
+            --notes "Свежая сборка приложения «Очистка» из main"
+
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 120
