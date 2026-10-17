@@ -26,6 +26,10 @@ class LinuxEnvironment(context: Context) {
     val isInstalled: Boolean
         get() = File(rootfs, INSTALLED_MARKER).exists() && File(rootfs, "usr/local/bin/okno-desktop").exists()
 
+    /** The installed Okno files start XFCE on the app's X server (older ones bring Xvnc). */
+    val hasX11Desktop: Boolean
+        get() = File(rootfs, "usr/local/share/okno-termux-x11").exists()
+
     /** Version of the installed system image, as written by [RootfsInstaller]. */
     val installedVersion: String?
         get() = File(rootfs, INSTALLED_MARKER).takeIf { it.exists() }?.readText()?.trim()

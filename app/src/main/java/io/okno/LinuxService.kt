@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Handler
@@ -48,6 +50,7 @@ class LinuxService : Service() {
     private val idleClient = IdleSessionClient()
 
     private var installing = false
+    private var xserver: Process? = null
     private var desktop: Process? = null
     private var ssh: Process? = null
     private var sshTookWakeLock = false
@@ -79,7 +82,7 @@ class LinuxService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
-        desktop?.destroy()
+        stopDesktop()
         ssh?.destroy()
         sessions.forEach { it.finishIfRunning() }
         sessions.clear()
@@ -134,27 +137,52 @@ class LinuxService : Service() {
         }
     }
 
-    /** Unix socket of the desktop's VNC server, as seen from Android. */
-    val desktopSocket: File get() = File(env.rootfs, "tmp/.okno/vnc.sock")
+    val isDesktopRunning: Boolean get() = xserver?.isAlive == true && desktop?.isAlive == true
 
-    val isDesktopRunning: Boolean get() = desktop?.isAlive == true
-
-    /** Starts Xvnc + XFCE inside Linux (see rootfs-overlay/usr/local/bin/okno-desktop). */
-    fun startDesktop(width: Int, height: Int, dpi: Int) {
+    /**
+     * Starts the X server (Termux:X11, an Android process outside proot that
+     * draws straight to the app's window) and XFCE on it inside Linux (see
+     * rootfs-overlay/usr/local/bin/okno-desktop). The server's socket lands
+     * in Linux's /tmp/.X11-unix, where its programs look for it.
+     */
+    fun startDesktop(dpi: Int) {
         if (isDesktopRunning) return
+        stopDesktop()
         links.start()
-        desktopSocket.delete()
-        desktop = startLinuxProcess(listOf(DESKTOP_LAUNCHER, "$width", "$height", "$dpi"), DESKTOP_LOG)
+        val display = freeDisplay()
+        val tmp = File(env.rootfs, "tmp")
+        xserver = ProcessBuilder(
+            "/system/bin/app_process", "-Djava.library.path=${applicationInfo.nativeLibraryDir}", "/",
+            "com.termux.x11.OknoXServer", ":$display", "-dpi", "$dpi",
+        ).directory(tmp).redirectErrorStream(true).redirectOutput(File(env.filesDir, XSERVER_LOG)).apply {
+            environment()["CLASSPATH"] = applicationInfo.sourceDir
+            environment()["TMPDIR"] = tmp.absolutePath
+        }.start()
+        desktop = startLinuxProcess(listOf(DESKTOP_LAUNCHER, ":$display"), DESKTOP_LOG)
         updateNotification()
     }
 
     fun stopDesktop() {
         desktop?.destroy()
+        xserver?.destroy()
         desktop = null
+        xserver = null
         updateNotification()
     }
 
-    fun desktopLog(): String = readLog(DESKTOP_LOG)
+    /**
+     * X programs try the abstract socket @/tmp/.X11-unix/X<n> before the
+     * file, and those names are shared by all apps on the phone: a display
+     * number another app (a Termux X server, say) holds would catch Okno's
+     * programs. Take the first one nobody listens on.
+     */
+    private fun freeDisplay(): Int = (1..63).first { n ->
+        runCatching {
+            LocalSocket().use { it.connect(LocalSocketAddress("/tmp/.X11-unix/X$n", LocalSocketAddress.Namespace.ABSTRACT)) }
+        }.isFailure
+    }
+
+    fun desktopLog(): String = readLog(XSERVER_LOG).takeLast(1500) + readLog(DESKTOP_LOG).takeLast(2500)
 
     val isSshRunning: Boolean get() = ssh?.isAlive == true
 
@@ -344,6 +372,7 @@ class LinuxService : Service() {
         private const val TRANSCRIPT_ROWS = 5000
         private const val DESKTOP_LAUNCHER = "/usr/local/bin/okno-desktop"
         private const val DESKTOP_LOG = "desktop.log"
+        private const val XSERVER_LOG = "xserver.log"
         private const val SSH_LAUNCHER = "/usr/local/bin/okno-ssh"
         private const val SSH_LOG = "ssh.log"
         private const val PREF_SSH_PASSWORD = "ssh_password"

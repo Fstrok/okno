@@ -1,6 +1,6 @@
 // Okno: US letters on levels 1-2 and Russian (JCUKEN) on levels 3-4 of the
 // same keys, all in one group. Text typed on the phone then always finds its
-// keysym in the keymap, so Xvnc never has to remap spare keys on the fly
+// keysym in the keymap, so the X server never has to remap spare keys on the fly
 // (which races with applications reading the keymap).
 default partial alphanumeric_keys
 xkb_symbols "basic" {

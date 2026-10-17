@@ -9,4 +9,11 @@
         <item name="android:colorPrimary">@color/bar</item>
         <item name="android:colorBackground">#262A33</item>
     </style>
+
+    <!-- The desktop window is Termux:X11's activity, which needs AppCompat. -->
+    <style name="Theme.Okno.Desktop" parent="LorieAppTheme">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="colorAccent">@color/accent</item>
+        <item name="android:alertDialogTheme">@android:style/Theme.Material.Dialog.Alert</item>
+    </style>
 </resources>
