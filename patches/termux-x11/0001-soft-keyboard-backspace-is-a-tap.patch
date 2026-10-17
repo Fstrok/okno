@@ -1,0 +1,39 @@
+diff --git a/lorie/src/main/java/com/termux/x11/LorieView.java b/lorie/src/main/java/com/termux/x11/LorieView.java
+index 7f4cb0a..238277b 100644
+--- a/lorie/src/main/java/com/termux/x11/LorieView.java
++++ b/lorie/src/main/java/com/termux/x11/LorieView.java
+@@ -554,9 +554,17 @@ public class LorieView extends SurfaceView implements InputStub {
+         }
+     };
+ 
++    // A soft keyboard never holds a key: holding its Backspace is a stream of taps. Its events
++    // reach us asynchronously, and some IMEs drop the release, so a press could be left without
++    // a release and the X server's autorepeat would then erase text until the next tap.
++    private static boolean isSoftBackspace(KeyEvent event) {
++        return event.getKeyCode() == KeyEvent.KEYCODE_DEL
++                && (event.getFlags() & KeyEvent.FLAG_SOFT_KEYBOARD) != 0;
++    }
++
+     @Override
+     public boolean dispatchKeyEventPreIme(KeyEvent event) {
+-        if (imeBuggyKeys.contains(event.getKeyCode())) {
++        if (imeBuggyKeys.contains(event.getKeyCode()) && !isSoftBackspace(event)) {
+             // IME does not handle/send events for some keys correctly correctly.
+             // So we should send key release manually in the case if IME will not send it...
+             // I.e. in the case of CTRL+Backspace IME does not send Backspace release event.
+@@ -573,6 +581,15 @@ public class LorieView extends SurfaceView implements InputStub {
+ 
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent event) {
++        if (isSoftBackspace(event)) {
++            // A tap: the release follows the press by itself, whatever the IME sends after it.
++            if (event.getAction() != KeyEvent.ACTION_DOWN)
++                return true;
++            boolean handled = super.dispatchKeyEvent(event);
++            keyReleaseHandler.sendEmptyMessageDelayed(KeyEvent.KEYCODE_DEL, 30);
++            return handled;
++        }
++
+         if (imeBuggyKeys.contains(event.getKeyCode())) {
+             // remove messages we posted in dispatchKeyEventPreIme
+             int action = event.getAction();
