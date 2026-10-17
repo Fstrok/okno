@@ -30,8 +30,8 @@ main() {
     # display server reached by the app
     tigervnc-standalone-server dbus-x11
     # look and feel
-    greybird-gtk-theme elementary-xfce-icon-theme librsvg2-common
-    fonts-dejavu-core fonts-noto-color-emoji
+    arc-theme elementary-xfce-icon-theme librsvg2-common
+    fonts-inter-variable fonts-dejavu-core fonts-noto-color-emoji
     # remote access (started from the app, see rootfs-overlay/usr/local/bin/okno-ssh)
     openssh-server
     # Claude Code's eyes and hands on the desktop (okno-screen)
@@ -65,7 +65,8 @@ main() {
   # No GPU behind Xvnc: leave out Mesa's software 3D stack (~180 MB; Xvnc only
   # dlopens it for OpenGL clients) and the HiDPI icon set the desktop never uses.
   cat > "$FS/etc/dpkg/dpkg.cfg.d/okno-slim" <<'EOF2'
-# Okno leaves out Mesa's software 3D (no GPU behind the desktop) and HiDPI icons.
+# Okno leaves out Mesa's software 3D (no GPU behind the desktop), HiDPI icons
+# and the Arc variants it does not use (its theme builds on Arc-Dark).
 # For OpenGL programs: delete this file, then
 #   apt install --reinstall libllvm19 mesa-libgallium libgl1-mesa-dri libz3-4
 path-exclude /usr/lib/*/libLLVM*
@@ -73,6 +74,13 @@ path-exclude /usr/lib/*/libgallium*
 path-exclude /usr/lib/*/libz3.so*
 path-exclude /usr/lib/*/dri/*
 path-exclude /usr/share/icons/elementary-xfce-hidpi/*
+path-exclude /usr/share/themes/Arc/*
+path-exclude /usr/share/themes/Arc-Darker/*
+path-exclude /usr/share/themes/Arc-Lighter/*
+path-exclude /usr/share/themes/Arc-Dark/cinnamon/*
+path-exclude /usr/share/themes/Arc-Dark/gnome-shell/*
+path-exclude /usr/share/themes/Arc-Dark/plank/*
+path-exclude /usr/share/themes/Arc-Dark/unity/*
 EOF2
 
   # Skipping debconf's preconfigure pass changes nothing in noninteractive mode
@@ -138,8 +146,10 @@ EOF2
     /shutdown/ShowSuspend bool false /shutdown/ShowHibernate bool false \
     /shutdown/ShowHybridSleep bool false /shutdown/ShowSwitchUser bool false
   "$ROOT_DIR/scripts/xfconf-set.py" "$XF/xsettings.xml" \
-    /Net/ThemeName string Greybird /Net/IconThemeName string elementary-xfce \
-    /Gtk/FontName string "DejaVu Sans 10" /Gtk/MonospaceFontName string "DejaVu Sans Mono 10"
+    /Net/ThemeName string Okno /Net/IconThemeName string elementary-xfce-dark \
+    /Gtk/FontName string "Inter Variable 10" /Gtk/MonospaceFontName string "DejaVu Sans Mono 10"
+  # Window frames of the Okno theme (its GTK part is in rootfs-overlay).
+  "$ROOT_DIR/scripts/xfwm4-theme.py" "$FS/usr/share/themes/Okno/xfwm4"
 
   # The WIN key opens the Start menu, as on Windows (added to XFCE's own defaults).
   KS="$FS/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml"
@@ -168,6 +178,7 @@ EOF2
       ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml \
       ./etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml \
       ./etc/xdg/xfce4/helpers.rc
+    (cd "$FS" && find ./usr/share/themes/Okno/xfwm4 -type f)
   } | sort -u > "$WORK/update.list"
   mkdir -p "$ASSETS"
   tar --numeric-owner -C "$FS" -czf "$ASSETS/okno-update.tgz" -T "$WORK/update.list"
@@ -184,7 +195,7 @@ EOF2
   mv "$ASSETS/rootfs.tgz.part" "$ASSETS/rootfs.tgz"
   {
     echo "base=$(cat "$base_tar.version")"
-    echo "overlay=$(cd "$ROOT_DIR" && cat scripts/build-rootfs.sh native/* $(find rootfs-overlay -type f | sort) | sha256sum | cut -c1-16)"
+    echo "overlay=$(cd "$ROOT_DIR" && cat scripts/build-rootfs.sh scripts/xfwm4-theme.py native/* $(find rootfs-overlay -type f | sort) | sha256sum | cut -c1-16)"
   } > "$ASSETS/rootfs.version"
   du -sh "$FS" "$ASSETS/rootfs.tgz"
 }

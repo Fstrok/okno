@@ -2,7 +2,11 @@ package io.okno
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -47,7 +51,8 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
 
     init {
         isHorizontalScrollBarEnabled = false
-        setBackgroundColor(Color.parseColor("#1B1B1F"))
+        setBackgroundColor(BAR)
+        row.setPadding(dp(3), dp(4), dp(3), dp(4))
         addView(row)
         setKeys(TERMINAL_KEYS)
     }
@@ -69,21 +74,27 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
     }
 
     private fun highlight(modifier: Modifier) {
-        modifierViews[modifier]?.setTextColor(if (modifier in active) Color.parseColor("#7AA2F7") else Color.WHITE)
+        val on = modifier in active
+        modifierViews[modifier]?.apply {
+            setTextColor(if (on) BAR else TEXT)
+            (background as RippleDrawable).getDrawable(0).setTint(if (on) ACCENT else KEY)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun makeKey(label: String, action: Action): TextView {
         val view = TextView(context).apply {
             text = label
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(TEXT)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label.length == 1) 19f else 13f)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             gravity = Gravity.CENTER
-            minWidth = dp(46)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            val ripple = TypedValue()
-            context.theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
-            setBackgroundResource(ripple.resourceId)
+            minWidth = dp(44)
+            minHeight = dp(40)
+            setPadding(dp(10), 0, dp(10), 0)
+            val cap = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(KEY) }
+            background = RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), cap, null)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40)).apply { setMargins(dp(3), 0, dp(3), 0) }
         }
         when (action) {
             is Action.Toggle -> {
@@ -133,6 +144,11 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
+        private val BAR = Color.parseColor("#1F232B")
+        private val KEY = Color.parseColor("#2F343F")
+        private val TEXT = Color.parseColor("#D3DAE3")
+        private val ACCENT = Color.parseColor("#7AA2F7")
+
         private const val REPEAT_DELAY_MS = 400L
         private const val REPEAT_INTERVAL_MS = 50L
 
@@ -157,7 +173,7 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
         val TERMINAL_KEYS: List<Pair<String, Action>> = listOf(
             "☰" to Action.Button(BUTTON_MENU),
             "📋" to Action.Button(BUTTON_PASTE),
-            "↵" to Action.Key(KeyEvent.KEYCODE_ENTER),
+            "⏎" to Action.Key(KeyEvent.KEYCODE_ENTER),
             "ESC" to Action.Key(KeyEvent.KEYCODE_ESCAPE),
             "TAB" to Action.Key(KeyEvent.KEYCODE_TAB),
             "CTRL" to Action.Toggle(Modifier.CTRL),
@@ -173,7 +189,7 @@ class ExtraKeysView(context: Context, attrs: AttributeSet?) : HorizontalScrollVi
             "☰" to Action.Button(BUTTON_MENU),
             "⌨" to Action.Button(BUTTON_KEYBOARD),
             "📋" to Action.Button(BUTTON_PASTE),
-            "↵" to Action.Key(KeyEvent.KEYCODE_ENTER),
+            "⏎" to Action.Key(KeyEvent.KEYCODE_ENTER),
             "ESC" to Action.Key(KeyEvent.KEYCODE_ESCAPE),
             "TAB" to Action.Key(KeyEvent.KEYCODE_TAB),
             "CTRL" to Action.Toggle(Modifier.CTRL),

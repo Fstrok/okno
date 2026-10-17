@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Okno: desktop icons open with a single tap, as on a phone. -->
+<!-- Okno: its wallpaper; desktop icons open with a single tap, as on a phone. -->
 <channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitorVNC-0" type="empty">
+        <property name="workspace0" type="empty">
+          <property name="last-image" type="string" value="/usr/share/backgrounds/okno/okno.svg"/>
+          <property name="image-style" type="int" value="5"/>
+        </property>
+      </property>
+    </property>
+  </property>
   <property name="desktop-icons" type="empty">
     <property name="single-click" type="bool" value="true"/>
   </property>

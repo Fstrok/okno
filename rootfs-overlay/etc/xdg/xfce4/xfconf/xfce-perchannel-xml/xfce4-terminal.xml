@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Okno: colours of the desktop theme; no menu bar (a long press opens the
+     same menu), so the phone screen goes to the text. -->
+<channel name="xfce4-terminal" version="1.0">
+  <property name="font-name" type="string" value="DejaVu Sans Mono 10"/>
+  <property name="misc-menubar-default" type="bool" value="false"/>
+  <property name="misc-cursor-blinks" type="bool" value="true"/>
+  <property name="color-use-theme" type="bool" value="false"/>
+  <property name="color-foreground" type="string" value="#d3dae3"/>
+  <property name="color-background" type="string" value="#1f232b"/>
+  <property name="color-cursor" type="string" value="#7aa2f7"/>
+  <property name="color-cursor-use-default" type="bool" value="false"/>
+  <property name="color-bold-use-default" type="bool" value="true"/>
+  <property name="color-palette" type="string" value="#2f343f;#e0565b;#9ece6a;#e0af68;#7aa2f7;#bb9af7;#7dcfff;#c0caf5;#4b5162;#f7768e;#b9f27c;#ffc777;#89b4fa;#c7a9ff;#a4daff;#ffffff"/>
+</channel>
